@@ -23,7 +23,11 @@ final class GameHost {
     let renderer: Renderer?
 
     init() {
-        session = GameSession(playlist: LevelDef.campaign.filter { Self.playlist.contains($0.id) })
+        // `-level <id>` opens any baked sky on its own, for checks and screenshots.
+        let only = UserDefaults.standard.string(forKey: "level")
+        let ids = only.map { [$0] } ?? Self.playlist
+        let playlist = LevelDef.campaign.filter { ids.contains($0.id) }
+        session = GameSession(playlist: playlist.isEmpty ? LevelDef.campaign : playlist)
         renderer = Renderer(session: session)
     }
 }
@@ -41,10 +45,14 @@ struct GameScreen: View {
                 Text("This device can’t run Metal.")
                     .foregroundStyle(.secondary)
             }
+            BodyLabelsView(hud: host.session.hud)
+                .ignoresSafeArea()
             HUDView(hud: host.session.hud,
                     onNext: { host.session.nextLevel() },
                     onRestart: { host.session.restartLevel() },
-                    onToggleSound: { host.session.toggleMute() })
+                    onToggleSound: { host.session.toggleMute() },
+                    onCameraDistance: { host.session.cycleCameraDistance() },
+                    onCameraFollow: { host.session.toggleCameraFollow() })
         }
         .onAppear { host.session.start() }
     }

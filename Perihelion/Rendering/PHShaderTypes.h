@@ -16,59 +16,94 @@ typedef enum {
 } PHBufferIndex;
 
 typedef enum {
-    PHSpriteGlow = 0,     // soft emissive falloff
-    PHSpriteDisc = 1,     // solid antialiased disc
-    PHSpriteSparkle = 2,  // four-point star; params.x = rotation
-    PHSpriteRing = 3,     // params.x = radius (0…1), params.y = width
-    PHSpriteStar = 4,     // stellar surface; params.x = seed
-    PHSpritePlanet = 5,   // lit sphere; params.xy = light direction (screen, y up), .z = band frequency, .w = seed
-    PHSpriteHole = 6,     // horizon + photon ring + accretion; quad is 3× the horizon
+    PHStyleObservatory = 0,  // telescope photograph: nebulae, diffraction spikes, lensing
+    PHStyleLight = 1,        // long-exposure light painting on black
+    PHStyleAtlas = 2,        // engraved celestial atlas, gold ink on navy paper
+} PHStyle;
+
+typedef enum {
+    PHSpriteGlow = 0,            // soft emissive falloff
+    PHSpriteDisc = 1,            // antialiased disc; alpha = opacity
+    PHSpriteSparkle = 2,         // four-point star; params.x = rotation
+    PHSpriteRing = 3,            // params.x = radius (0…1), params.y = width
+    PHSpriteStar = 4,            // stellar surface; params.x = seed
+    PHSpritePlanet = 5,          // lit sphere; params.xy = light (screen, y up), .z = bands, .w = seed
+    PHSpriteHole = 6,            // horizon + photon ring + accretion; quad is 3× the horizon
+    PHSpriteSpikes = 7,          // telescope diffraction spikes; params.x = rotation
+    PHSpriteEngravedSun = 8,     // params.x = disc radius (0…1), .y = rotation
+    PHSpriteEngravedPlanet = 9,  // params.xy = light, .z = disc radius (0…1)
+    PHSpriteGlyph = 10,          // eight-point star glyph; params.x = rotation
+    PHSpriteChartRing = 11,      // params.x = radius, .y = tick count, .z = tick length, .w = dashes
 } PHSpriteKind;
+
+typedef enum {
+    PHRibbonGlow = 0,        // soft additive light
+    PHRibbonDoubleRule = 1,  // two parallel engraved lines
+    PHRibbonHairline = 2,    // one engraved line
+    PHRibbonFilament = 3,    // hot core with a soft sheath
+} PHRibbonProfile;
 
 typedef struct {
     simd_float4x4 worldToClip;
     simd_float2 drawableSize;  // pixels
     float pixelsPerUnit;       // drawable pixels per world unit
     float time;
+    int32_t style;             // PHStyle
+    float pad0;
+    float pad1;
+    float pad2;
 } PHFrameUniforms;
 
-// Colours are linear and premultiplied. A sprite that only emits light has
-// alpha 0 and simply adds; one that occludes carries its coverage in alpha.
+// Colours are linear and premultiplied. Light has alpha 0 and simply adds;
+// ink and solid bodies carry their coverage in alpha.
 typedef struct {
     simd_float2 position;  // world
     float radius;          // world units: half the quad's side
     int32_t kind;          // PHSpriteKind
-    simd_float4 color;
+    simd_float4 color;     // rgb; a = opacity for ink and solid kinds
     simd_float4 params;
 } PHSprite;
 
 typedef struct {
     simd_float2 position;  // world
     float across;          // -1 … +1 from one edge of the ribbon to the other
-    float pad;
-    simd_float4 color;     // linear rgb × a, additive
+    float along;           // world units from the start of the ribbon
+    simd_float4 color;     // rgb; a = intensity (light) or opacity (ink)
+    simd_float4 params;    // x = PHRibbonProfile, y = dash period (0 = solid)
 } PHRibbonVertex;
 
 typedef struct {
     simd_float2 position;  // world, before the masses bend it
 } PHGridVertex;
 
-#define PH_MAX_GRID_MASSES 8
+#define PH_MAX_MASSES 8
 
 typedef struct {
-    simd_float4 masses[PH_MAX_GRID_MASSES];  // x, y, μ, radius
+    simd_float4 masses[PH_MAX_MASSES];  // x, y, μ, radius
+    simd_float4 color;                  // rgb × intensity; a = 1 for ink, 0 for light
     int32_t count;
-    float intensity;
     float pad0;
     float pad1;
+    float pad2;
 } PHGridUniforms;
+
+typedef struct {
+    simd_float4 lenses[PH_MAX_MASSES];  // screen uv x, y; Einstein radius² in height units; unused
+    simd_float2 parallax;               // background uv offset from the camera's travel
+    float zoom;                         // background magnification (a fraction of the camera's)
+    float aspect;                       // drawable width / height
+    int32_t count;
+    float pad0;
+    float pad1;
+    float pad2;
+} PHLensUniforms;
 
 typedef struct {
     simd_float4 tint;      // nebula colour, linear
     float seed;
     float pixelsPerPoint;
-    float pad0;
-    float pad1;
+    int32_t style;
+    float pad;
 } PHBackgroundUniforms;
 
 typedef struct {
@@ -82,6 +117,10 @@ typedef struct {
     float exposure;
     float vignette;
     float time;
+    int32_t style;
+    float grain;
+    float aberration;
+    float pad;
 } PHCompositeUniforms;
 
 #endif /* PHShaderTypes_h */

@@ -1,3 +1,4 @@
+import CoreGraphics
 import Observation
 
 /// What SwiftUI shows over the field. Written only when something changes -
@@ -15,4 +16,14 @@ final class HUDModel {
     var cleared = false
     var isLastLevel = false
     var muted = false
+    var style = VisualStyle.observatory
+    var cameraFollows = true
+    /// Engraved names beside fixed bodies, atlas style only. Screen points.
+    var labels: [BodyLabel] = []
+}
+
+struct BodyLabel: Identifiable, Equatable {
+    let id: Int
+    let text: String
+    let point: CGPoint
 }
