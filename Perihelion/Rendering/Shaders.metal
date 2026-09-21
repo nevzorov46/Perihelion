@@ -369,15 +369,27 @@ fragment float4 ph_spriteFragment(SpriteOut in [[stage_in]],
         return float4(color * cover, cover);
     }
     case PHSpriteHole: {
-        float r = d * 3.0;  // in horizon radii
-        if (r > 3.0) discard_fragment();
-        float spin = frame.time * 1.4 / (0.4 + r * r * 0.25);
-        float2 q = rotate(uv, spin);
-        float swirl = fbm(q * float2(7.0, 2.2) + 3.0) * fbm(q * 13.0);
-        float disk = smoothstep(1.25, 1.7, r) * (1.0 - smoothstep(1.9, 3.0, r)) * (0.25 + swirl * 2.2);
-        float photon = exp(-pow((r - 1.1) / 0.07, 2.0)) * 2.4;
-        float shadow = 1.0 - smoothstep(1.0 - aa * 3.0, 1.0, r);
-        return float4(in.color.rgb * (disk + photon) * (1.0 - shadow), shadow);
+        // params.x: quad half-size in horizon radii (the quad is much wider than the hole)
+        float extent = max(in.params.x, 3.0);
+        float r = d * extent;  // in horizon radii
+        if (r > extent) discard_fragment();
+        float angle = atan2(uv.y, uv.x);
+        // Keplerian shear: inner gas laps the outer, ω ∝ r^-1.5
+        float spin = frame.time * 2.2 / pow(max(r, 1.0), 1.5);
+        float2 polar = float2(cos(angle + spin), sin(angle + spin)) * r;
+        float arms = fbm(float2(log(max(r, 1.0)) * 3.2 - (angle + spin) * 0.8, r * 0.35) * 2.4);
+        float grain = fbm(polar * 1.7 + 11.0);
+        float inner = 1.6, outer = extent * 0.95;
+        float disk = smoothstep(inner - 0.2, inner + 0.4, r) * (1.0 - smoothstep(outer * 0.55, outer, r));
+        disk *= 0.35 + 1.4 * arms * (0.6 + 0.6 * grain);
+        // a thin disk cools outward, T ∝ r^-3/4: white-blue inside, orange, then deep red
+        float temperature = pow(inner / max(r, inner), 0.75);
+        float3 hot = mix(float3(0.55, 0.12, 0.03), float3(1.0, 0.55, 0.2), smoothstep(0.25, 0.6, temperature));
+        hot = mix(hot, float3(1.0, 0.92, 0.85), smoothstep(0.7, 1.0, temperature));
+        float photon = exp(-pow((r - 1.35) / 0.09, 2.0)) * 3.0;
+        float shadow = 1.0 - smoothstep(1.0 - aa * extent, 1.0, r);
+        float3 glow = (hot * disk * (0.35 + 1.3 * temperature) + float3(1.0, 0.85, 0.7) * photon) * in.color.rgb;
+        return float4(glow * (1.0 - shadow), shadow);
     }
     case PHSpriteSpikes: {
         float2 q = rotate(uv, in.params.x);

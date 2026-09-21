@@ -306,8 +306,8 @@ final class SceneBuilder {
                 add(p, r * 2.4, PHSpriteRing, SIMD4(color * 0.5, 0), SIMD4(0.62, 0.05, 0, 0))
                 add(p, r, PHSpritePlanet, SIMD4(color, 1), SIMD4(light.x, light.y, 7 + Float(i) * 3, Float(i) * 5.3))
             case (.observatory, .hole):
-                add(p, r * 9, PHSpriteGlow, SIMD4(Palette.accretion * 0.22, 0))
-                add(p, r * 3, PHSpriteHole, SIMD4(Palette.accretion * 1.6, 1))
+                add(p, r * 12, PHSpriteGlow, SIMD4(Palette.accretion * 0.12, 0))
+                add(p, r * 5.5, PHSpriteHole, SIMD4(SIMD3(repeating: 0.6), 1), SIMD4(5.5, 0, 0, 0))
 
             case (.light, .star):
                 add(p, r * 6, PHSpriteGlow, SIMD4(color * 0.5, 0))
@@ -485,7 +485,18 @@ final class SceneBuilder {
             let beta = CometTail.betas[row]
             let near = 1 + 2.6 * exp(-col.age * 4)            // the coma end glows hottest
             let fade = (1 - t) * (1 - t) * (1 - t)
-            let gain = rowWeight[row] * min(col.activity, 2.2) * col.stria * fade * near * 0.11
+            // surface brightness follows grains per area: where the sheet is stretched
+            // thin - along a fold, or where syndynes cross - it dims, as real dust would
+            let here = tail.position(slot: col.slot, row: row)
+            let next = tail.position(slot: tail.column(min(c + 1, columns - 1)).slot, row: row)
+            let beside = tail.position(slot: col.slot, row: row == rows - 1 ? row - 1 : row + 1)
+            let along = simd_distance(here, next), across = simd_distance(here, beside)
+            let density = min(pow(900 / (max(along, 1) * max(across, 1)), 0.7), 1)
+            // where rows cross, quads turn inside out into long flat shards: no real
+            // dust makes straight edges, so any vertex far from its neighbours fades out
+            let reach = max(along, across)
+            let intact = 1 - min(max((reach - 45) / 45, 0), 1)
+            let gain = rowWeight[row] * min(col.activity, 2.2) * col.stria * fade * near * density * intact * 0.14
             let warm = simd_mix(SIMD3<Float>(0.86, 0.88, 1.0), SIMD3(1.0, 0.8, 0.5), SIMD3(repeating: 1 - beta))
             let color = style == .light ? Self.iridescent(beta * 0.8 + t * 0.3) : warm
             return PHRibbonVertex(position: tail.position(slot: col.slot, row: row), across: across, along: 0,

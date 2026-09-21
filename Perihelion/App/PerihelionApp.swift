@@ -16,17 +16,13 @@ struct PerihelionApp: App {
 }
 
 final class GameHost {
-    /// This build plays a first slice of the campaign.
-    static let playlist = ["first-light", "slingshot"]
-
     let session: GameSession
     let renderer: Renderer?
 
     init() {
-        // `-level <id>` opens any baked sky on its own, for checks and screenshots.
+        // the whole campaign; `-level <id>` opens one baked sky on its own, for checks and footage
         let only = UserDefaults.standard.string(forKey: "level")
-        let ids = only.map { [$0] } ?? Self.playlist
-        let playlist = LevelDef.campaign.filter { ids.contains($0.id) }
+        let playlist = LevelDef.campaign.filter { only == nil || $0.id == only }
         session = GameSession(playlist: playlist.isEmpty ? LevelDef.campaign : playlist)
         renderer = Renderer(session: session)
     }

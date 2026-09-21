@@ -28,7 +28,7 @@ typedef enum {
     PHSpriteRing = 3,            // params.x = radius (0…1), params.y = width
     PHSpriteStar = 4,            // stellar surface; params.x = seed
     PHSpritePlanet = 5,          // lit sphere; params.xy = light (screen, y up), .z = bands, .w = seed
-    PHSpriteHole = 6,            // horizon + photon ring + accretion; quad is 3× the horizon
+    PHSpriteHole = 6,            // horizon + photon ring + accretion disk; params.x = quad size in horizon radii
     PHSpriteSpikes = 7,          // telescope diffraction spikes; params.x = rotation
     PHSpriteEngravedSun = 8,     // params.x = disc radius (0…1), .y = rotation
     PHSpriteEngravedPlanet = 9,  // params.xy = light, .z = disc radius (0…1)
