@@ -38,11 +38,10 @@ private struct HUDTheme {
 
 struct HUDView: View {
     let hud: HUDModel
+    let onBack: () -> Void
     let onNext: () -> Void
     let onRestart: () -> Void
     let onToggleSound: () -> Void
-    let onCameraDistance: () -> Void
-    let onCameraFollow: () -> Void
 
     private var theme: HUDTheme { HUDTheme(style: hud.style) }
 
@@ -62,7 +61,8 @@ struct HUDView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .top) {
+        HStack(alignment: .top, spacing: 12) {
+            IconButton(systemName: "chevron.left", theme: theme, action: onBack)
             VStack(alignment: .leading, spacing: 6) {
                 Text(theme.caption(level: hud.levelNumber))
                     .font(theme.font(11, .semibold))
@@ -76,6 +76,8 @@ struct HUDView: View {
                     }
                     Text(hud.levelName)
                         .font(theme.font(hud.style == .atlas ? 27 : 24, .semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
                         .italic(hud.style == .atlas)
                         .foregroundStyle(theme.ink)
                 }
@@ -85,8 +87,6 @@ struct HUDView: View {
             .allowsHitTesting(false)
             Spacer()
             HStack(spacing: 8) {
-                IconButton(systemName: "arrow.up.left.and.arrow.down.right", theme: theme, action: onCameraDistance)
-                IconButton(systemName: hud.cameraFollows ? "location.fill" : "location.slash", theme: theme, action: onCameraFollow)
                 IconButton(systemName: hud.muted ? "speaker.slash" : "speaker.wave.2", theme: theme, action: onToggleSound)
                 IconButton(systemName: "arrow.counterclockwise", theme: theme, action: onRestart)
             }

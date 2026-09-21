@@ -32,6 +32,9 @@ struct GameScreen: View {
     let host: GameHost
     /// `-clean YES` hides every overlay: footage of the sky alone, for editing.
     private let isClean = UserDefaults.standard.bool(forKey: "clean")
+    /// Footage and test runs (`-demo`, `-level`, `-clean`) go straight into a sky.
+    private static let skipsMenu = ["demo", "level", "clean"].contains { UserDefaults.standard.object(forKey: $0) != nil }
+    @State private var screen: Screen = GameScreen.skipsMenu ? .playing : .title
 
     var body: some View {
         ZStack {
@@ -43,17 +46,45 @@ struct GameScreen: View {
                 Text("This device can’t run Metal.")
                     .foregroundStyle(.secondary)
             }
-            if !isClean {
-                BodyLabelsView(hud: host.session.hud)
-                    .ignoresSafeArea()
-                HUDView(hud: host.session.hud,
-                        onNext: { host.session.nextLevel() },
-                        onRestart: { host.session.restartLevel() },
-                        onToggleSound: { host.session.toggleMute() },
-                        onCameraDistance: { host.session.cycleCameraDistance() },
-                        onCameraFollow: { host.session.toggleCameraFollow() })
+            switch screen {
+            case .title:
+                TitleView(onPlay: { play(host.session.progress.nextIndex(in: host.session.playlist)) },
+                          onSkies: { show(.skies) })
+                    .transition(.opacity)
+            case .skies:
+                SkiesView(levels: host.session.playlist, progress: host.session.progress,
+                          onPick: { play($0) }, onBack: { show(.title) })
+                    .transition(.opacity)
+            case .playing:
+                if !isClean {
+                    BodyLabelsView(hud: host.session.hud)
+                        .ignoresSafeArea()
+                    HUDView(hud: host.session.hud,
+                            onBack: { backToTitle() },
+                            onNext: { host.session.nextLevel() },
+                            onRestart: { host.session.restartLevel() },
+                            onToggleSound: { host.session.toggleMute() })
+                        .transition(.opacity)
+                }
             }
         }
-        .onAppear { host.session.start() }
+        .onAppear {
+            host.session.start()
+            if screen != .playing { host.session.enterAttract() }
+        }
+    }
+
+    private func show(_ next: Screen) {
+        withAnimation(.easeInOut(duration: 0.35)) { screen = next }
+    }
+
+    private func play(_ index: Int) {
+        host.session.play(index)
+        show(.playing)
+    }
+
+    private func backToTitle() {
+        host.session.enterAttract()
+        show(.title)
     }
 }

@@ -19,7 +19,16 @@ final class Synth {
     }
 
     var isMuted = false {
-        didSet { engine.mainMixerNode.outputVolume = isMuted ? 0 : 1 }
+        didSet { applyVolume() }
+    }
+
+    /// Master level when not muted; the title screen plays quietly.
+    var volume: Float = 1 {
+        didSet { applyVolume() }
+    }
+
+    private func applyVolume() {
+        engine.mainMixerNode.outputVolume = isMuted ? 0 : volume
     }
 
     private let engine = AVAudioEngine()

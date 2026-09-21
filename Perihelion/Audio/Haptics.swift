@@ -3,6 +3,11 @@ import OSLog
 
 /// The taptic engine as a second instrument: every close pass is felt as well as heard.
 final class Haptics {
+    /// Off on the title screen: the attract loop shouldn't buzz in your hand.
+    var isEnabled = true {
+        didSet { if !isEnabled { releaseGravity(); humLatched = false } }
+    }
+
     private var engine: CHHapticEngine?
     private var needsRestart = false
     private var hum: CHHapticAdvancedPatternPlayer?
@@ -42,7 +47,7 @@ final class Haptics {
     /// A continuous rumble that follows the gravitational pull, 0 … 1. Parameters
     /// are only sent when the level moves noticeably, to stay off the haptic server.
     func gravity(_ level: Float) {
-        guard let engine else { return }
+        guard isEnabled, let engine else { return }
         if humLatched {
             if level < 0.05 { humLatched = false }
             return
@@ -113,7 +118,7 @@ final class Haptics {
     }
 
     private func play(_ events: [CHHapticEvent]) {
-        guard let engine else { return }
+        guard isEnabled, let engine else { return }
         do {
             if needsRestart {
                 try engine.start()

@@ -108,14 +108,17 @@ final class GameSession {
 
     /// `-demo YES` fires each level's proof shot by itself - for recordings and checks.
     private let isDemo = UserDefaults.standard.bool(forKey: "demo")
+    /// The title screen's live background: the game plays its own showcase skies.
+    private(set) var isAttract = false
+    private var attractCursor = 0
+    private static let showcase = ["three-body", "binary", "event-horizon", "orrery", "slingshot"]
+    /// The player's own mute, restored when leaving the title screen.
+    private var userMuted = false
+    let progress = Progress()
     /// How close the camera pulls in during flight, and whether it tracks the comet.
-    /// Both are switchable in the HUD while playing and remembered between runs;
-    /// `-zoom 1.3 -follow NO` sets them for one launch.
-    private(set) var flightZoom = UserDefaults.standard.string(forKey: "zoom").flatMap(Double.init)
-        ?? UserDefaults.standard.object(forKey: "cameraZoom") as? Double ?? 1.15
-    private(set) var followsComet = UserDefaults.standard.string(forKey: "follow").map { ["YES", "1", "true"].contains($0) }
-        ?? UserDefaults.standard.object(forKey: "cameraFollows") as? Bool ?? true
-    private static let distances = [0.85, 1.0, 1.15, 1.3, 1.45]
+    /// Still being tuned: `-zoom 1.3 -follow NO` tries other settings for one launch.
+    private let flightZoom = UserDefaults.standard.string(forKey: "zoom").flatMap(Double.init) ?? 1.15
+    private let followsComet = UserDefaults.standard.string(forKey: "follow").map { ["YES", "1", "true"].contains($0) } ?? true
     private var demoStart: Double?
 
     init(playlist: [LevelDef]) {
@@ -130,6 +133,7 @@ final class GameSession {
         let defaults = UserDefaults.standard
         if defaults.bool(forKey: "mute") {
             synth.isMuted = true
+            userMuted = true
             hud.muted = true
         }
         synth.start()
@@ -140,10 +144,6 @@ final class GameSession {
             synth.startRecording(to: documents.appendingPathComponent("perihelion.wav"))
             recordingEndsAt = defaults.string(forKey: "recordSeconds").flatMap(Double.init) ?? 120
         }
-        // write back what we resolved, so a launch override doesn't leave a stale
-        // value behind for the next run
-        UserDefaults.standard.set(flightZoom, forKey: "cameraZoom")
-        UserDefaults.standard.set(followsComet, forKey: "cameraFollows")
     }
 
     func layout(size: CGSize, safeTop: CGFloat, safeBottom: CGFloat) {
@@ -226,12 +226,42 @@ final class GameSession {
         hud.toast = nil
         hud.cleared = false
         hud.isLastLevel = index == playlist.count - 1
-        hud.cameraFollows = followsComet
         updateLabels()
     }
 
     func nextLevel() {
         load((levelIndex + 1) % playlist.count)
+    }
+
+    /// Title screen: loop the showcase skies, quietly, without haptics.
+    func enterAttract() {
+        isAttract = true
+        haptics.isEnabled = false
+        synth.volume = 0.35
+        loadShowcase()
+    }
+
+    /// Leave the title screen and play sky `index`.
+    func play(_ index: Int) {
+        isAttract = false
+        haptics.isEnabled = true
+        synth.volume = 1
+        synth.isMuted = userMuted
+        hud.muted = userMuted
+        load(min(max(index, 0), playlist.count - 1))
+    }
+
+    private func loadShowcase() {
+        let ids = Self.showcase
+        for step in 0..<ids.count {
+            let id = ids[(attractCursor + step) % ids.count]
+            if let index = playlist.firstIndex(where: { $0.id == id }) {
+                attractCursor = (attractCursor + step + 1) % ids.count
+                load(index)
+                return
+            }
+        }
+        load(0)
     }
 
     func restartLevel() {
@@ -240,22 +270,8 @@ final class GameSession {
 
     func toggleMute() {
         synth.isMuted.toggle()
+        userMuted = synth.isMuted
         hud.muted = synth.isMuted
-    }
-
-    func cycleCameraDistance() {
-        let nearest = Self.distances.min { abs($0 - flightZoom) < abs($1 - flightZoom) } ?? 1.15
-        let index = Self.distances.firstIndex(of: nearest) ?? 0
-        flightZoom = Self.distances[(index + 1) % Self.distances.count]
-        UserDefaults.standard.set(flightZoom, forKey: "cameraZoom")
-        showToast(String(format: "Camera %.2f×", flightZoom), for: 2.6)
-    }
-
-    func toggleCameraFollow() {
-        followsComet.toggle()
-        hud.cameraFollows = followsComet
-        UserDefaults.standard.set(followsComet, forKey: "cameraFollows")
-        showToast(followsComet ? "Camera follows the comet" : "Camera holds the field", for: 2.6)
     }
 
     // MARK: - Touch
@@ -445,7 +461,7 @@ final class GameSession {
         updateClimax(dt: dt)
         pulses.removeAll { clock - $0.start > 1.4 }
         updateCamera(dt: dt)
-        if isDemo { runDemo() }
+        if isDemo || isAttract { runDemo() }
     }
 
     private func handle(_ event: FlightEvent, in current: Flight) {
@@ -477,6 +493,7 @@ final class GameSession {
 
         case .complete:
             completedAt = clock
+            if !isAttract { progress.record(level.def.id, shots: shots) }
             for (i, degree) in Music.resolution.enumerated() {
                 synth.play(.chime, midi: Music.midi(root: level.def.root, degree: degree), velocity: 0.5,
                            pan: Float(i) * 0.3 - 0.45, delay: 0.3 + Float(i) * 0.12)
@@ -519,9 +536,9 @@ final class GameSession {
         }
     }
 
-    private func showToast(_ text: String, for duration: Double = 1.8) {
+    private func showToast(_ text: String) {
         hud.toast = text
-        toastUntil = clock + duration
+        toastUntil = clock + 1.8
     }
 
     private func pan(_ p: SIMD2<Double>) -> Float {
@@ -672,7 +689,7 @@ final class GameSession {
     private func runDemo() {
         guard let shot = level.def.shot else { return }
         if hud.cleared, let completedAt, clock - completedAt > 4 {
-            nextLevel()
+            if isAttract { loadShowcase() } else { nextLevel() }
             return
         }
         guard flight == nil, rewind == nil else { return }
