@@ -574,6 +574,11 @@ final class GameSession {
 
         var zoomTarget = 1.0
         var focusTarget = center
+        if isAttract {
+            // the title screen: the whole sky, held still, above the controls
+            finishCamera(zoomTarget: 1, focusTarget: center, dt: dt)
+            return
+        }
         if let current = flight, current.isFlying, completedAt == nil, rewind == nil {
             zoomTarget = flightZoom + 0.07 * easedSlowness
             guard followsComet else {
@@ -616,8 +621,10 @@ final class GameSession {
         } else {
             camera.shake = .zero
         }
+        // on the title screen the sky sits in the upper part, clear of the buttons
+        let bottom = layoutInsets.bottom + (isAttract ? 250 : 0)
         transform = FieldTransform(viewSize: layoutInsets.size, topInset: layoutInsets.top,
-                                   bottomInset: layoutInsets.bottom, camera: camera)
+                                   bottomInset: bottom, camera: camera)
     }
 
     /// How fast simulated time runs against the clock: slower near a mass.
