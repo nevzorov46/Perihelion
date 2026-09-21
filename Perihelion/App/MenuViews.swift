@@ -20,7 +20,7 @@ struct TitleView: View {
                     .foregroundStyle(.white)
                     .shadow(color: .black.opacity(0.8), radius: 8)
                     .shadow(color: Color(red: 0.6, green: 0.75, blue: 1).opacity(0.55), radius: 18)
-                Text("a gravity game that plays music")
+                Text("a gravity game where orbits play notes")
                     .font(.system(size: 15, weight: .light))
                     .tracking(2.4)
                     .foregroundStyle(.white.opacity(0.88))

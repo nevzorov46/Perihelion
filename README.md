@@ -1,6 +1,6 @@
 # Perihelion
 
-A gravity-assist puzzle for iPhone where your trajectory plays music.
+A gravity-assist puzzle for iPhone where orbits play notes.
 
 Pull back, let go, and a comet flies through a star system under real Newtonian gravity. Collect every mote of light in one shot. Every close pass of a star or planet rings a note and taps the Taptic Engine; every mote climbs a pentatonic scale. A clean run ends on a rising phrase.
 
