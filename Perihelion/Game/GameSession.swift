@@ -23,6 +23,14 @@ struct Pulse {
     let strength: Float
 }
 
+/// A ring of distortion expanding from a close pass (drawn in the composite pass).
+struct Shockwave {
+    let center: SIMD2<Double>
+    let start: Double
+    let strength: Float
+    static let life = 0.9
+}
+
 /// One play session: aiming, flying, rewinding, clearing.
 ///
 /// Lives on the main thread and is advanced by the renderer's frame callback
@@ -46,6 +54,12 @@ final class GameSession {
     /// Time slows with it, and the picture flares.
     private(set) var slowness: Double = 0
     private(set) var completedAt: Double?
+    private(set) var shockwaves: [Shockwave] = []
+    /// A brief exposure kick at the tightest passes, decaying to 0.
+    private(set) var flash: Double = 0
+    /// Remaining freeze of simulated time after a hard pass (hit-stop).
+    private var hitStop: Double = 0
+    private var recordingEndsAt: Double?
     /// Where the bodies are drawn: the flight's time, or winding back to zero.
     private(set) var bodyTime: Double = 0
 
@@ -113,11 +127,19 @@ final class GameSession {
     }
 
     func start() {
-        if UserDefaults.standard.bool(forKey: "mute") {
+        let defaults = UserDefaults.standard
+        if defaults.bool(forKey: "mute") {
             synth.isMuted = true
             hud.muted = true
         }
         synth.start()
+        // `-recordAudio YES [-recordSeconds 120]`: the soundtrack of a footage run,
+        // written to Documents/perihelion.wav and closed cleanly when time is up
+        if defaults.bool(forKey: "recordAudio"),
+           let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
+            synth.startRecording(to: documents.appendingPathComponent("perihelion.wav"))
+            recordingEndsAt = defaults.string(forKey: "recordSeconds").flatMap(Double.init) ?? 120
+        }
         // write back what we resolved, so a launch override doesn't leave a stale
         // value behind for the next run
         UserDefaults.standard.set(flightZoom, forKey: "cameraZoom")
@@ -181,6 +203,9 @@ final class GameSession {
         bodyTime = 0
         slowness = 0
         tail.reset()
+        shockwaves = []
+        flash = 0
+        hitStop = 0
         easedSlowness = 0
         easedSlownessVelocity = 0
         camera = Camera()
@@ -357,11 +382,20 @@ final class GameSession {
 
     func advance(dt: Double) {
         clock += dt
+        if let end = recordingEndsAt, clock >= end {
+            synth.stopRecording()
+            recordingEndsAt = nil
+        }
         updateSlowness(dt: dt)
 
         if var current = flight {
             if current.isFlying {
-                accumulator += dt * timeScale
+                // a hard pass freezes simulated time for a beat; the world keeps glowing
+                if hitStop > 0 {
+                    hitStop -= dt
+                } else {
+                    accumulator += dt * timeScale
+                }
                 var budget = 96
                 while accumulator >= Sim.dt && current.isFlying && budget > 0 {
                     current.step()
@@ -408,6 +442,7 @@ final class GameSession {
         }
         updateParticles(Float(dt))
         updateTail(dt: dt)
+        updateClimax(dt: dt)
         pulses.removeAll { clock - $0.start > 1.4 }
         updateCamera(dt: dt)
         if isDemo { runDemo() }
@@ -420,8 +455,16 @@ final class GameSession {
             let strength = Float(min(max(log10(pull / Sim.perihelionPull) / 1.6, 0.12), 1))
             synth.play(.bell, midi: Music.midi(root: level.def.root, degree: Music.bodyDegree(b, index: body)),
                        velocity: 0.35 + 0.65 * strength, pan: pan(current.bodyPositions[body]))
+            haptics.releaseGravity()
             haptics.pass(strength: strength, sharpness: b.kind == .planet || b.kind == .moon ? 0.55 : 0.2)
             pulses.append(Pulse(body: body, start: clock, strength: strength))
+            if strength > 0.3 {
+                // the climax: space rings out from the body, the frame flares, time catches its breath
+                shockwaves.append(Shockwave(center: current.bodyPositions[body], start: clock, strength: strength))
+                if shockwaves.count > Int(PH_MAX_WAVES) { shockwaves.removeFirst() }
+                flash = max(flash, Double(strength))
+                if strength > 0.45 { hitStop = 0.04 + 0.09 * Double(strength) }
+            }
 
         case let .collect(mote, order):
             collectedAt[mote] = clock
@@ -562,6 +605,23 @@ final class GameSession {
 
     /// How fast simulated time runs against the clock: slower near a mass.
     var timeScale: Double { 1 - 0.62 * slowness }
+
+    private func updateClimax(dt: Double) {
+        flash *= exp(-dt * 5)
+        shockwaves.removeAll { clock - $0.start > Shockwave.life }
+        // the pull, felt: a hum that swells as the comet dives in and snaps off at the closest point
+        var level: Float = 0
+        if let current = flight, current.isFlying, cometVisible, completedAt == nil {
+            var pull = 0.0
+            for i in self.level.bodies.indices {
+                let d = current.bodyPositions[i] - current.position
+                pull = max(pull, self.level.bodies[i].mu / (d.x * d.x + d.y * d.y + 1))
+            }
+            let x = Float(min(max((pull - 700) / (6000 - 700), 0), 1))
+            level = x * x
+        }
+        haptics.gravity(level)
+    }
 
     private func updateTail(dt: Double) {
         let emitting = flight.map { $0.isFlying && cometVisible } ?? false

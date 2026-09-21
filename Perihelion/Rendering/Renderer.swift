@@ -220,6 +220,10 @@ final class Renderer: NSObject, MTKViewDelegate {
             encoder.setFragmentTexture(scene, index: 0)
             encoder.setFragmentTexture(bloomTextures[0], index: 1)
             var composite = Self.composite(for: style, time: Float(session.clock), slowness: Float(session.slowness))
+            composite.aspect = Float(size.width / size.height)
+            composite.exposure += 0.22 * Float(session.flash)
+            composite.bloomStrength += 0.35 * Float(session.flash)
+            fillWaves(&composite, transform: transform)
             encoder.setFragmentBytes(&composite, length: MemoryLayout<PHCompositeUniforms>.stride, index: 0)
             encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 3)
             encoder.endEncoding()
@@ -228,20 +232,47 @@ final class Renderer: NSObject, MTKViewDelegate {
         commandBuffer.commit()
     }
 
+    /// Shockwaves in screen space: centre in uv, radius and strength decaying with age.
+    private func fillWaves(_ composite: inout PHCompositeUniforms, transform: FieldTransform) {
+        let waves = session.shockwaves.suffix(Int(PH_MAX_WAVES))
+        let height = Double(max(transform.viewSize.height, 1))
+        withUnsafeMutableBytes(of: &composite.waves) { raw in
+            let slots = raw.bindMemory(to: SIMD4<Float>.self)
+            for (i, wave) in waves.enumerated() {
+                let age = (session.clock - wave.start) / Shockwave.life
+                let center = transform.toScreen(wave.center)
+                let radius = (40 + 520 * age) * transform.scale / height   // world units → height units
+                let fade = (1 - age) * (1 - age)
+                slots[i] = SIMD4(Float(center.x / transform.viewSize.width), Float(Double(center.y) / height),
+                                 Float(radius), wave.strength * Float(fade))
+            }
+        }
+        composite.waveCount = Int32(waves.count)
+    }
+
     private static func composite(for style: VisualStyle, time: Float, slowness: Float) -> PHCompositeUniforms {
+        var u = PHCompositeUniforms()
+        u.time = time
+        u.style = style.rawValue
         switch style {
         case .observatory:
             // diving close to a mass: the lens strains, the edges close in
-            return PHCompositeUniforms(bloomStrength: 1.0 + 0.3 * slowness, exposure: 1.05 + 0.05 * slowness,
-                                       vignette: 1.0 + 0.7 * slowness, time: time, style: style.rawValue,
-                                       grain: 0.035, aberration: 0.004 + 0.012 * slowness, pad: 0)
+            u.bloomStrength = 1.0 + 0.3 * slowness
+            u.exposure = 1.05 + 0.05 * slowness
+            u.vignette = 1.0 + 0.7 * slowness
+            u.grain = 0.035
+            u.aberration = 0.004 + 0.012 * slowness
         case .light:
-            return PHCompositeUniforms(bloomStrength: 1.35, exposure: 1.0, vignette: 1.1, time: time,
-                                       style: style.rawValue, grain: 0, aberration: 0, pad: 0)
+            u.bloomStrength = 1.35
+            u.exposure = 1.0
+            u.vignette = 1.1
         case .atlas:
-            return PHCompositeUniforms(bloomStrength: 0.12, exposure: 1.0, vignette: 1.4, time: time,
-                                       style: style.rawValue, grain: 0.06, aberration: 0, pad: 0)
+            u.bloomStrength = 0.12
+            u.exposure = 1.0
+            u.vignette = 1.4
+            u.grain = 0.06
         }
+        return u
     }
 
     // MARK: - Passes

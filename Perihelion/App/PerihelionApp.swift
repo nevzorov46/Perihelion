@@ -30,6 +30,8 @@ final class GameHost {
 
 struct GameScreen: View {
     let host: GameHost
+    /// `-clean YES` hides every overlay: footage of the sky alone, for editing.
+    private let isClean = UserDefaults.standard.bool(forKey: "clean")
 
     var body: some View {
         ZStack {
@@ -41,14 +43,16 @@ struct GameScreen: View {
                 Text("This device can’t run Metal.")
                     .foregroundStyle(.secondary)
             }
-            BodyLabelsView(hud: host.session.hud)
-                .ignoresSafeArea()
-            HUDView(hud: host.session.hud,
-                    onNext: { host.session.nextLevel() },
-                    onRestart: { host.session.restartLevel() },
-                    onToggleSound: { host.session.toggleMute() },
-                    onCameraDistance: { host.session.cycleCameraDistance() },
-                    onCameraFollow: { host.session.toggleCameraFollow() })
+            if !isClean {
+                BodyLabelsView(hud: host.session.hud)
+                    .ignoresSafeArea()
+                HUDView(hud: host.session.hud,
+                        onNext: { host.session.nextLevel() },
+                        onRestart: { host.session.restartLevel() },
+                        onToggleSound: { host.session.toggleMute() },
+                        onCameraDistance: { host.session.cycleCameraDistance() },
+                        onCameraFollow: { host.session.toggleCameraFollow() })
+            }
         }
         .onAppear { host.session.start() }
     }

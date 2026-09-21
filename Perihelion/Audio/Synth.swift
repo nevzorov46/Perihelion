@@ -24,6 +24,8 @@ final class Synth {
 
     private let engine = AVAudioEngine()
     private let reverb = AVAudioUnitReverb()
+    private var recording: AVAudioFile?
+    private let recordingQueue = DispatchQueue(label: "perihelion.synth.recording")
     private let commands = CommandRing()
     private let bank = VoiceBank()
     private var isConfigured = false
@@ -83,6 +85,43 @@ final class Synth {
             self?.start()
         }
         isConfigured = true
+    }
+
+    /// Writes everything the synth plays to a 16-bit WAV, tapping before the main
+    /// mixer so it records even while the game is muted. For editing footage:
+    /// simulator screen recordings carry no sound.
+    func startRecording(to url: URL) {
+        guard isRunning, recording == nil else { return }
+        let format = reverb.outputFormat(forBus: 0)
+        let settings: [String: Any] = [
+            AVFormatIDKey: kAudioFormatLinearPCM,
+            AVSampleRateKey: format.sampleRate,
+            AVNumberOfChannelsKey: format.channelCount,
+            AVLinearPCMBitDepthKey: 16,
+            AVLinearPCMIsFloatKey: false,
+            AVLinearPCMIsBigEndianKey: false,
+        ]
+        do {
+            try? FileManager.default.removeItem(at: url)
+            let file = try AVAudioFile(forWriting: url, settings: settings,
+                                       commonFormat: .pcmFormatFloat32, interleaved: false)
+            recording = file
+            let queue = recordingQueue
+            reverb.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
+                queue.async { try? file.write(from: buffer) }
+            }
+            log.notice("recording audio to \(url.path)")
+        } catch {
+            log.error("audio recording failed: \(error.localizedDescription)")
+        }
+    }
+
+    func stopRecording() {
+        guard let file = recording else { return }
+        reverb.removeTap(onBus: 0)
+        recording = nil
+        recordingQueue.sync { file.close() }
+        log.notice("audio recording closed")
     }
 
     /// `pan` is -1 (left) … 1 (right); `delay` in seconds.

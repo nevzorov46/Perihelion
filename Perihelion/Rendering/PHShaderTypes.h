@@ -80,6 +80,7 @@ typedef struct {
 } PHGridVertex;
 
 #define PH_MAX_MASSES 8
+#define PH_MAX_WAVES 4
 
 typedef struct {
     simd_float4 masses[PH_MAX_MASSES];  // x, y, μ, radius
@@ -123,7 +124,12 @@ typedef struct {
     int32_t style;
     float grain;
     float aberration;
-    float pad;
+    float aspect;                     // drawable width / height
+    simd_float4 waves[PH_MAX_WAVES];  // screen uv x, y; radius (height units); strength
+    int32_t waveCount;
+    float pad0;
+    float pad1;
+    float pad2;
 } PHCompositeUniforms;
 
 #endif /* PHShaderTypes_h */

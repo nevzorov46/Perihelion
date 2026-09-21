@@ -561,9 +561,23 @@ fragment float4 ph_compositeFragment(FullscreenOut in [[stage_in]],
                                      constant PHCompositeUniforms &u [[buffer(0)]]) {
     constexpr sampler s(filter::linear, address::clamp_to_edge);
     float2 uv = in.uv;
+    // shockwaves: a thin ring pushes the picture outward as it expands, and splits
+    // the colours slightly on its front, like a lens flexing
+    float2 push = 0;
+    float fringe = 0;
+    for (int i = 0; i < u.waveCount; i++) {
+        float2 d = (uv - u.waves[i].xy) * float2(u.aspect, 1.0);
+        float dist = max(length(d), 1e-4);
+        float x = (dist - u.waves[i].z) / 0.03;
+        float ring = exp(-x * x) * u.waves[i].w;
+        push += d / dist * ring * float2(1.0 / u.aspect, 1.0);
+        fringe += ring;
+    }
+    uv -= push * 0.05;
     float3 hdr;
-    if (u.aberration > 0) {
-        float2 shift = (uv - 0.5) * u.aberration;
+    float split = u.aberration + fringe * 0.012;
+    if (split > 0) {
+        float2 shift = (uv - 0.5) * u.aberration + push * 0.012;
         hdr = float3(scene.sample(s, uv + shift).r, scene.sample(s, uv).g, scene.sample(s, uv - shift).b);
     } else {
         hdr = scene.sample(s, uv).rgb;
