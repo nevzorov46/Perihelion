@@ -84,7 +84,9 @@ vertex FullscreenOut ph_fullscreenVertex(uint vid [[vertex_id]]) {
 
 // MARK: - Background (baked once per level and style)
 
-static float3 starfield(float2 px, float seed, float ppp, int style) {
+/// Engraved cross-stars for the atlas; the other styles draw stars as sprites,
+/// which lets them carry depth and drift.
+static float3 engravedStars(float2 px, float seed, float ppp) {
     float3 color = 0;
     const float cellPoints[3] = { 9.0, 24.0, 70.0 };
     const float density[3] = { 0.12, 0.14, 0.24 };
@@ -95,31 +97,13 @@ static float3 starfield(float2 px, float seed, float ppp, int style) {
         if (h > density[layer]) continue;
         float2 center = (id + 0.2 + 0.6 * hash22(id + float(layer) * 7.3)) * cell;
         float2 delta = px - center;
-        float d = length(delta);
         float brightness = (0.25 + 0.75 * pow(hash12(id * 1.37), 3.0)) * (0.5 + float(layer) * 0.6);
-
-        if (style == PHStyleAtlas) {
-            // engraved cross-stars, gold
-            float size = (1.2 + 2.2 * float(layer)) * ppp * (0.7 + brightness);
-            float w = 0.45 * ppp;
-            float crossMark = max(band(delta.x, 0, w, ppp * 0.6) * step(abs(delta.y), size),
-                                  band(delta.y, 0, w, ppp * 0.6) * step(abs(delta.x), size));
-            float pin = 1.0 - smoothstep(0.6 * ppp, 1.2 * ppp, d);
-            color += float3(0.80, 0.58, 0.26) * max(crossMark * (layer == 0 ? 0.0 : 1.0), pin) * 0.28 * brightness;
-            continue;
-        }
-
-        float r = (0.35 + 0.55 * float(layer)) * ppp * (0.6 + h / density[layer]);
-        float light = exp(-d * d / (r * r)) * brightness;
-        float temperature = pow(hash12(id * 2.11 + 5.0), 4.0);
-        float3 tint = mix(float3(0.62, 0.72, 1.0), float3(1.0, 0.9, 0.8), temperature);
-        float gain = style == PHStyleLight ? 0.05 : 0.26;
-        color += tint * light * gain;
-        // only the brightest few carry spikes, and quietly: spikes belong to the level's stars
-        if (style == PHStyleObservatory && layer == 2 && brightness > 0.95) {
-            float2 q = delta / (r * 16.0);
-            color += tint * spikes(q, 1.0) * 0.05 * brightness;
-        }
+        float size = (1.2 + 2.2 * float(layer)) * ppp * (0.7 + brightness);
+        float w = 0.45 * ppp;
+        float crossMark = max(band(delta.x, 0, w, ppp * 0.6) * step(abs(delta.y), size),
+                              band(delta.y, 0, w, ppp * 0.6) * step(abs(delta.x), size));
+        float pin = 1.0 - smoothstep(0.6 * ppp, 1.2 * ppp, length(delta));
+        color += float3(0.86, 0.56, 0.2) * max(crossMark * (layer == 0 ? 0.0 : 1.0), pin) * 0.28 * brightness;
     }
     return color;
 }
@@ -141,10 +125,9 @@ fragment float4 ph_backgroundFragment(FullscreenOut in [[stage_in]],
         float3 gas = mix(float3(0.04, 0.32, 0.42), float3(0.78, 0.32, 0.09), smoothstep(0.38, 0.62, hue));
         gas = mix(gas, float3(0.42, 0.09, 0.34), smoothstep(0.55, 0.8, fbm(q * 1.1 + 7.7)) * 0.6);
         float dust = smoothstep(0.48, 0.78, fbm(q * 3.3 - bg.seed * 2.3 + warp * 1.2));
-        color += gas * density * density * 0.18 * (1.0 - 0.85 * dust);
-        color += float3(0.9, 0.72, 0.5) * pow(density, 7.0) * 0.12 * (1.0 - dust);
+        color += gas * density * density * 0.27 * (1.0 - 0.85 * dust);
+        color += float3(0.9, 0.72, 0.5) * pow(density, 6.0) * 0.17 * (1.0 - dust);
         color += bg.tint.rgb * pow(fbm(q * 0.5 + 9.0), 3.0) * 0.02;
-        color += starfield(px, bg.seed, bg.pixelsPerPoint, bg.style) * (1.0 - 0.7 * dust);
         break;
     }
     case PHStyleLight: {
@@ -152,7 +135,6 @@ fragment float4 ph_backgroundFragment(FullscreenOut in [[stage_in]],
         float glow = saturate(1.0 - length((in.uv - float2(0.5, 0.52)) * float2(1.0, 0.8)) * 1.3);
         color += float3(0.008, 0.006, 0.011) * glow * glow;
         color *= 0.9 + 0.2 * fbm(p * 2.5 + bg.seed);
-        color += starfield(px, bg.seed, bg.pixelsPerPoint, bg.style);
         break;
     }
     default: { // atlas
@@ -160,15 +142,19 @@ fragment float4 ph_backgroundFragment(FullscreenOut in [[stage_in]],
         float fibers = valueNoise(float2(px.x * 0.018, px.y * 0.45) / bg.pixelsPerPoint);
         float speckle = step(0.985, hash12(floor(px / bg.pixelsPerPoint))) * 0.25;
         color = kPaper * (0.78 + 0.45 * mottling) * (0.94 + 0.12 * fibers) * (1.0 + speckle);
-        color += starfield(px, bg.seed, bg.pixelsPerPoint, bg.style);
+        color += engravedStars(px, bg.seed, bg.pixelsPerPoint);
         break;
     }
     }
     return float4(color, 1);
 }
 
-/// Draws the baked background as seen through the masses: each one is a
-/// gravitational lens, so a source at β appears at θ with β = θ − θE²/θ.
+/// Draws the baked sky as seen through the masses: each one is a gravitational
+/// lens, so a source at β appears at θ with β = θ − θE²/θ.
+///
+/// The nebula is one baked texture read twice, at two scales drifting in
+/// different directions. That is enough to make the clouds flow without paying
+/// for noise every frame, and the two speeds read as depth.
 fragment float4 ph_lensFragment(FullscreenOut in [[stage_in]],
                                 texture2d<float> source [[texture(0)]],
                                 constant PHLensUniforms &lens [[buffer(PHBufferIndexExtra)]]) {
@@ -181,8 +167,25 @@ fragment float4 ph_lensFragment(FullscreenOut in [[stage_in]],
         shift += d * (lens.lenses[i].z / r2);
     }
     shift.x /= lens.aspect;
-    float2 sky = (uv - shift - 0.5) / lens.zoom + 0.5 + lens.parallax;
-    return float4(source.sample(s, sky).rgb, 1);
+    float t = lens.time;
+    float2 centred = uv - shift - 0.5;
+    float2 base = centred / lens.zoom + 0.5 + lens.parallax;
+
+    // the cloud's own colour, read at a crawl, is the flow field that bends it:
+    // three texture reads and the nebula curls instead of sliding
+    float2 probe = base * 0.45 + float2(t * 0.004, t * -0.003);
+    float2 flow = (source.sample(s, probe).rg - 0.35) * 0.16;
+
+    float2 near = base + float2(t * 0.021, t * -0.013) + flow;
+    float spin = t * 0.02;
+    float2 turned = float2(centred.x * cos(spin) - centred.y * sin(spin),
+                           centred.x * sin(spin) + centred.y * cos(spin));
+    float2 far = turned / (lens.zoom * 1.45) + 0.5 + lens.parallax * 1.7
+               + float2(t * -0.011, t * 0.016) + flow * 0.5;
+
+    float3 color = source.sample(s, near).rgb * (0.72 + 0.14 * sin(t * 0.05))
+                 + source.sample(s, far).rgb * (0.58 + 0.14 * cos(t * 0.037));
+    return float4(color, 1);
 }
 
 // MARK: - Spacetime grid
@@ -257,6 +260,9 @@ fragment float4 ph_ribbonFragment(RibbonOut in [[stage_in]]) {
     case PHRibbonHairline: {
         return ink(in.color.rgb, band(x, 0, 0.3, 0.45) * in.color.a * dash);
     }
+    case PHRibbonSheet: {
+        return float4(in.color.rgb * in.color.a * dash, 0);
+    }
     case PHRibbonFilament: {
         float core = exp(-x * x * 14.0);
         float sheath = (1.0 - x * x) * (1.0 - x * x);
@@ -310,6 +316,17 @@ fragment float4 ph_spriteFragment(SpriteOut in [[stage_in]],
         float core = exp(-d * d * 22.0);
         float halo = 0.025 / (d * d + 0.025);
         float a = (core * 0.55 + halo * 0.45) * (1.0 - smoothstep(0.5, 1.0, d));
+        return float4(in.color.rgb * a, 0);
+    }
+    case PHSpriteStreak: {
+        float2 axis = normalize(in.params.xy + float2(1e-5, 0));
+        float2 q = float2(dot(uv, axis), dot(uv, float2(-axis.y, axis.x)) * in.params.z);
+        float r = length(q);
+        float a = (exp(-r * r * 30.0) + 0.02 / (r * r + 0.02) * 0.4) * (1.0 - smoothstep(0.6, 1.0, r));
+        return float4(in.color.rgb * a, 0);
+    }
+    case PHSpriteHaze: {
+        float a = exp(-d * d * 4.5) * (1.0 - smoothstep(0.7, 1.0, d));
         return float4(in.color.rgb * a, 0);
     }
     case PHSpriteDisc: {
@@ -499,6 +516,33 @@ fragment float4 ph_upsampleFragment(FullscreenOut in [[stage_in]],
     return float4(color / 16.0 * u.intensity, 1);
 }
 
+// AgX (Troy Sobotka; minimal fit after Benjamin Wrensch). Unlike ACES it lets very
+// bright, saturated light roll off toward white instead of skewing hue - a blue
+// star stays blue-white instead of turning cyan.
+static float3 agxContrast(float3 x) {
+    float3 x2 = x * x, x4 = x2 * x2;
+    return 15.5 * x4 * x2 - 40.14 * x4 * x + 31.96 * x4 - 6.868 * x2 * x + 0.4298 * x2 + 0.1191 * x - 0.00232;
+}
+
+static float3 agx(float3 color) {
+    const float3x3 inset = float3x3(0.842479062253094, 0.0423282422610123, 0.0423756549057051,
+                                    0.0784335999999992, 0.878468636469772, 0.0784336,
+                                    0.0792237451477643, 0.0791661274605434, 0.879142973793104);
+    const float3x3 outset = float3x3(1.19687900512017, -0.0528968517574562, -0.0529716355144438,
+                                     -0.0980208811401368, 1.15190312990417, -0.0980434501171241,
+                                     -0.0990297440797205, -0.0989611768448433, 1.15107367264116);
+    const float minEV = -12.47393, maxEV = 4.026069;
+    float3 v = inset * max(color, 1e-10);
+    v = (clamp(log2(v), minEV, maxEV) - minEV) / (maxEV - minEV);
+    v = saturate(agxContrast(v));
+    // "punchy" look: a little more contrast and saturation than the neutral fit
+    float luma = dot(v, float3(0.2126, 0.7152, 0.0722));
+    v = pow(v, 1.3);
+    v = luma + 1.35 * (v - luma);
+    v = outset * v;
+    return pow(saturate(v), 2.2); // back to linear; the sRGB drawable encodes it
+}
+
 fragment float4 ph_compositeFragment(FullscreenOut in [[stage_in]],
                                      texture2d<float> scene [[texture(0)]],
                                      texture2d<float> bloom [[texture(1)]],
@@ -515,8 +559,8 @@ fragment float4 ph_compositeFragment(FullscreenOut in [[stage_in]],
     hdr += bloom.sample(s, uv).rgb * u.bloomStrength;
     float3 x = hdr * u.exposure;
     float3 mapped = u.style == PHStyleAtlas
-        ? 1.0 - exp(-x * 1.3)                                                    // soft, print-like shoulder
-        : saturate((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14));   // ACES fit (Narkowicz)
+        ? 1.0 - exp(-x * 1.3)   // soft, print-like shoulder
+        : agx(x);
     float2 c = uv - 0.5;
     mapped *= 1.0 - dot(c, c) * u.vignette;
     if (u.grain > 0) {

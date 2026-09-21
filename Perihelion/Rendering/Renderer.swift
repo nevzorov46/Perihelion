@@ -5,7 +5,7 @@ import QuartzCore
 ///
 ///   1. scene     rgba16Float: lensed background, bent grid, ribbons, sprites
 ///   2. bloom     13-tap downsample ×5, tent upsample ×4 (Jimenez, SIGGRAPH 2014)
-///   3. composite scene + bloom → ACES tonemap → vignette → sRGB drawable
+///   3. composite scene + bloom → AgX tonemap → vignette → sRGB drawable
 ///
 /// The background (nebula + stars) is expensive per pixel and never moves, so it
 /// is rendered once per level into its own texture and blitted afterwards.

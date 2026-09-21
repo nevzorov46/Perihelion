@@ -34,6 +34,8 @@ typedef enum {
     PHSpriteEngravedPlanet = 9,  // params.xy = light, .z = disc radius (0…1)
     PHSpriteGlyph = 10,          // eight-point star glyph; params.x = rotation
     PHSpriteChartRing = 11,      // params.x = radius, .y = tick count, .z = tick length, .w = dashes
+    PHSpriteHaze = 12,           // soft gaussian with no bright core: many overlap into a veil
+    PHSpriteStreak = 13,         // glow stretched along params.xy (screen, y up) by params.z
 } PHSpriteKind;
 
 typedef enum {
@@ -41,6 +43,7 @@ typedef enum {
     PHRibbonDoubleRule = 1,  // two parallel engraved lines
     PHRibbonHairline = 2,    // one engraved line
     PHRibbonFilament = 3,    // hot core with a soft sheath
+    PHRibbonSheet = 4,       // no falloff across: strips tile into one smooth surface
 } PHRibbonProfile;
 
 typedef struct {
@@ -93,9 +96,9 @@ typedef struct {
     float zoom;                         // background magnification (a fraction of the camera's)
     float aspect;                       // drawable width / height
     int32_t count;
+    float time;                         // seconds, for the nebula's drift
     float pad0;
     float pad1;
-    float pad2;
 } PHLensUniforms;
 
 typedef struct {

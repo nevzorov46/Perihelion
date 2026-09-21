@@ -34,6 +34,7 @@ final class GameSession {
     let hud = HUDModel()
     let synth = Synth()
     let haptics = Haptics()
+    let tail = CometTail()
     let playlist: [LevelDef]
 
     private(set) var levelIndex = 0
@@ -80,7 +81,7 @@ final class GameSession {
     private var layoutInsets = (size: CGSize.zero, top: CGFloat(0), bottom: CGFloat(0))
     private var shakeEnergy = 0.0
     private var shakePhase = 0.0
-    private var dustBudget = 0.0
+    private var tailPositions: [SIMD2<Double>] = []
     // camera springs
     private var focusVelocity = SIMD2<Double>.zero
     private var zoomVelocity = 0.0
@@ -112,6 +113,10 @@ final class GameSession {
     }
 
     func start() {
+        if UserDefaults.standard.bool(forKey: "mute") {
+            synth.isMuted = true
+            hud.muted = true
+        }
         synth.start()
         // write back what we resolved, so a launch override doesn't leave a stale
         // value behind for the next run
@@ -175,6 +180,7 @@ final class GameSession {
         rewind = nil
         bodyTime = 0
         slowness = 0
+        tail.reset()
         easedSlowness = 0
         easedSlownessVelocity = 0
         camera = Camera()
@@ -355,7 +361,7 @@ final class GameSession {
 
         if var current = flight {
             if current.isFlying {
-                accumulator += dt * (1 - 0.62 * slowness)
+                accumulator += dt * timeScale
                 var budget = 96
                 while accumulator >= Sim.dt && current.isFlying && budget > 0 {
                     current.step()
@@ -374,7 +380,6 @@ final class GameSession {
                 flight = current
                 for event in events { handle(event, in: current) }
                 if !current.isFlying && endedAt == nil { endedAt = clock }
-                shedDust(current, dt: dt)
             }
             if let completedAt, !hud.cleared, clock - completedAt > 1.6 {
                 hud.cleared = true
@@ -402,6 +407,7 @@ final class GameSession {
             self.toastUntil = nil
         }
         updateParticles(Float(dt))
+        updateTail(dt: dt)
         pulses.removeAll { clock - $0.start > 1.4 }
         updateCamera(dt: dt)
         if isDemo { runDemo() }
@@ -554,20 +560,23 @@ final class GameSession {
                                    bottomInset: layoutInsets.bottom, camera: camera)
     }
 
-    /// Dust shed from the coma: more of it the faster the comet moves.
-    private func shedDust(_ current: Flight, dt: Double) {
-        guard cometVisible, current.isFlying else { return }
-        let v = current.velocity
-        let speed = (v.x * v.x + v.y * v.y).squareRoot()
-        dustBudget += dt * 50 * min(speed / 500, 1.6)
-        while dustBudget >= 1 {
-            dustBudget -= 1
-            let jitter = SIMD2<Float>(.random(in: -3...3), .random(in: -3...3))
-            let drift = SIMD2<Float>(.random(in: -14...14), .random(in: -14...14)) - SIMD2<Float>(v) * 0.04
-            particles.append(Particle(position: SIMD2<Float>(current.position) + jitter, velocity: drift, age: 0,
-                                      life: .random(in: 0.6...1.4), color: SIMD3(1.0, 0.78, 0.5) * 0.45,
-                                      size: .random(in: 2.5...4.5)))
+    /// How fast simulated time runs against the clock: slower near a mass.
+    var timeScale: Double { 1 - 0.62 * slowness }
+
+    private func updateTail(dt: Double) {
+        let emitting = flight.map { $0.isFlying && cometVisible } ?? false
+        if let current = flight {
+            tailPositions = current.bodyPositions
+        } else {
+            if tailPositions.count != level.bodies.count {
+                tailPositions = Array(repeating: .zero, count: level.bodies.count)
+            }
+            level.positions(at: bodyTime, into: &tailPositions)
         }
+        tail.update(dt: Float(dt * timeScale),
+                    comet: emitting ? flight.map { ($0.position, $0.velocity) } : nil,
+                    bodies: level.bodies, positions: tailPositions,
+                    ageRate: rewind == nil ? 1 : 4)
     }
 
     // MARK: - Particles

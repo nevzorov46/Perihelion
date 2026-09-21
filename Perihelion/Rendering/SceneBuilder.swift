@@ -16,6 +16,8 @@ final class SceneBuilder {
     private var positions: [SIMD2<Double>] = []
     private var style = VisualStyle.observatory
     private var time: Float = 0
+    private var starfield = Starfield(seed: 1)
+    private var starfieldSeed: UInt32 = 1
 
     func build(_ session: GameSession) {
         sprites.removeAll(keepingCapacity: true)
@@ -30,11 +32,18 @@ final class SceneBuilder {
         }
         level.positions(at: session.bodyTime, into: &positions)
 
+        let seed = SeededRandom.hash("sky/\(level.def.id)")
+        if seed != starfieldSeed {
+            starfield = Starfield(seed: seed)
+            starfieldSeed = seed
+        }
+
         buildGrid(level)
         buildLens(session)
-        if style == .atlas { chartFrame() }
+        if style == .atlas { chartFrame() } else { sky(session) }
         orbitGuides(level)
         trails(session)
+        tails(session)
         aim(session)
         bodies(session)
         motes(session)
@@ -76,6 +85,7 @@ final class SceneBuilder {
                               Float(-t.fitScale * travel.x / Double(t.viewSize.height))) * 0.2
         lens.zoom = Float(1 + (camera.zoom - 1) * 0.2)
         lens.aspect = Float(t.viewSize.width / t.viewSize.height)
+        lens.time = time
         guard style == .observatory else { return }
         let bodies = session.level.bodies
         let count = min(bodies.count, Int(PH_MAX_MASSES))
@@ -89,6 +99,29 @@ final class SceneBuilder {
             }
         }
         lens.count = Int32(count)
+    }
+
+    /// Stars and dust, placed by depth against the camera's travel. Drawn first,
+    /// so everything in the field sits in front of them.
+    private func sky(_ session: GameSession) {
+        let travel = SIMD2<Float>(session.camera.focus - SIMD2(Sim.width / 2, Sim.height / 2))
+        let dim: Float = style == .light ? 0.22 : 1
+        for star in starfield.stars {
+            let p = Starfield.place(star, time: time, cameraTravel: travel)
+            var gain = star.brightness * dim
+            if star.twinkleRate > 0 { gain *= 0.78 + 0.22 * sin(time * star.twinkleRate + star.twinklePhase) }
+            sprite(p, star.radius * 2.4, PHSpriteGlow, SIMD4(star.color * gain * 1.5, 0))
+            if star.brightness > 0.5 {
+                sprite(p, star.radius * 0.55, PHSpriteDisc, SIMD4(star.color * gain * 3, 0))
+            }
+            if star.spikes && style == .observatory {
+                sprite(p, star.radius * 10, PHSpriteSpikes, SIMD4(star.color * gain * 0.3, 0))
+            }
+        }
+        for mote in starfield.dust {
+            let p = Starfield.place(mote, time: time, cameraTravel: travel)
+            sprite(p, mote.radius, PHSpriteGlow, SIMD4(mote.color * mote.brightness * dim * 0.6, 0))
+        }
     }
 
     /// A cartographer's border: a double rule around the field, a hairline outside it.
@@ -168,7 +201,7 @@ final class SceneBuilder {
             wave = Float(session.clock - completedAt - 0.25) / 1.5
         }
         func heat(_ i: Int) -> Float {
-            let head = 2.6 * max(0, 1 - Float(n - 1 - i) / 70)
+            let head = (style == .observatory ? 0.8 : 2.6) * max(0, 1 - Float(n - 1 - i) / 70)
             guard wave > -0.2 && wave < 1.2 else { return 1 + head }
             let x = (Float(i) / Float(n) - wave) / 0.07
             return 1 + head + 3.5 * exp(-x * x)
@@ -369,9 +402,19 @@ final class SceneBuilder {
 
         switch style {
         case .observatory:
-            if !resting { ionTail(session, from: position) }
-            add(position, 46, PHSpriteGlow, SIMD4(SIMD3(0.7, 0.9, 1.0) * 1.3 * breathe, 0))
-            add(position, 4.5, PHSpriteDisc, SIMD4(SIMD3(repeating: 6 * breathe), 0))
+            let activity = session.tail.activity
+            let velocity = session.flight?.velocity ?? .zero
+            if !resting { ionTail(session, from: position, velocity: velocity, activity: activity) }
+            // the coma glows green-teal, as real ones do (diatomic carbon), and swells as the ices boil off
+            add(position, 56 * (0.75 + 0.22 * activity), PHSpriteGlow,
+                SIMD4(SIMD3(0.42, 0.95, 0.72) * 0.9 * breathe * (0.7 + 0.25 * activity), 0))
+            // the nucleus stretches along its motion, so speed reads at a glance
+            let speed = Float((velocity.x * velocity.x + velocity.y * velocity.y).squareRoot())
+            let stretch = 1 + min(speed / 600, 1.6)
+            let heading = speed > 1 ? SIMD2<Float>(Float(velocity.y), Float(velocity.x)) / speed : SIMD2<Float>(1, 0)
+            add(position, 14 * stretch, PHSpriteStreak, SIMD4(SIMD3(repeating: 3.2 * breathe), 0),
+                SIMD4(heading.x, heading.y, stretch, 0))
+            add(position, 3.6, PHSpriteDisc, SIMD4(SIMD3(repeating: 6 * breathe), 0))
         case .light:
             add(position, 28, PHSpriteGlow, SIMD4(SIMD3(repeating: 1.2 * breathe), 0))
             add(position, 3.5, PHSpriteDisc, SIMD4(SIMD3(repeating: 8 * breathe), 0))
@@ -380,20 +423,98 @@ final class SceneBuilder {
         }
     }
 
-    /// The ion tail points straight away from the star, whatever the comet's heading.
-    private func ionTail(_ session: GameSession, from head: SIMD2<Double>) {
+    /// The ion tail: straight away from the star, whatever the comet's heading -
+    /// bent back a touch when the comet is fast (aberration against the solar
+    /// wind). Five filaments with kinks travelling outward along them, over a soft
+    /// blue sheath.
+    private func ionTail(_ session: GameSession, from head: SIMD2<Double>, velocity: SIMD2<Double>, activity: Float) {
         let bodies = session.level.bodies
-        let stars = bodies.indices.filter { bodies[$0].kind == .star || bodies[$0].kind == .hole }
-        guard let star = stars.min(by: { simd_distance(positions[$0], head) < simd_distance(positions[$1], head) }) else { return }
+        var best: Int?
+        var strongest = 0.0
+        for i in bodies.indices where bodies[i].kind == .star || bodies[i].kind == .hole {
+            let d = head - positions[i]
+            let flux = (bodies[i].kind == .star ? 1 : 0.5) / max(d.x * d.x + d.y * d.y, 1)
+            if flux > strongest { strongest = flux; best = i }
+        }
+        guard let star = best else { return }
         let away = head - positions[star]
-        let distance = max(simd_length(away), 1)
-        let direction = SIMD2<Float>(away / distance)
-        let length = Float(min(max(bodies[star].mu * 1.4e-3 / distance, 30), 240))
+        let distance = max((away.x * away.x + away.y * away.y).squareRoot(), 1)
+        var axis = SIMD2<Float>(away / distance) - SIMD2<Float>(velocity) / 1800
+        axis = simd_normalize(axis)
+        let normal = SIMD2(-axis.y, axis.x)
+        let length = Float(min(max(bodies[star].mu * 0.0016 / distance, 60), 320)) * (0.55 + 0.25 * activity)
         let base = SIMD2<Float>(head)
-        let n = 16
-        appendRibbon(count: n, width: 16, widthScale: { i in 0.25 + Float(i) / Float(n) }, profile: PHRibbonGlow) { i in
-            let t = Float(i) / Float(n - 1)
-            return (base + direction * length * t, SIMD4(SIMD3(0.35, 0.6, 1.0), 1.4 * (1 - t) * (1 - t)))
+        let gain = min(activity / 1.5, 1.2)
+        let n = 28
+
+        appendRibbon(count: n, width: 30, widthScale: { i in 0.2 + Float(i) / Float(n) }, profile: PHRibbonGlow) { i in
+            let s = Float(i) / Float(n - 1)
+            return (base + axis * length * s, SIMD4(SIMD3(0.3, 0.55, 1.0), 0.22 * gain * (1 - s)))
+        }
+        for f in 0..<5 {
+            let spread = (Float(f) - 2) * 0.035 + 0.012 * sin(time * 0.7 + Float(f))
+            let dir = simd_normalize(axis + normal * spread)
+            let side = SIMD2(-dir.y, dir.x)
+            let phase = Float(f) * 1.7
+            let strength: Float = f == 2 ? 1 : 0.55
+            appendRibbon(count: n, width: f == 2 ? 2.6 : 1.8, profile: PHRibbonFilament) { i in
+                let s = Float(i) / Float(n - 1)
+                let reach = length * s
+                let kink = sin(2 * .pi * (reach / 90 - time * 1.6) + phase) * (3 + 10 * s) * s
+                let fade = (1 - s) * (1 - s)
+                return (base + dir * reach + side * kink, SIMD4(SIMD3(0.4, 0.62, 1.0), 0.9 * strength * gain * fade))
+            }
+        }
+    }
+
+    /// The dust tail: strips between neighbouring syndynes, stitched into one
+    /// surface. Brightest near the nucleus and along the orbit, where the big
+    /// grains are; fading with age and toward the finest grains.
+    private func tails(_ session: GameSession) {
+        guard style != .atlas else { return }
+        let tail = session.tail
+        let columns = tail.columnCount
+        guard columns > 1 else { return }
+        let rows = CometTail.rows
+        let rowWeight: [Float] = [0, 0.75, 1, 0.95, 0.8, 0.6, 0.4, 0.2, 0]
+        let params = SIMD4<Float>(Float(PHRibbonSheet.rawValue), 0, 0, 0)
+
+        func vertex(_ c: Int, _ row: Int, _ across: Float) -> PHRibbonVertex {
+            let col = tail.column(c)
+            let t = col.age / CometTail.life
+            let beta = CometTail.betas[row]
+            let near = 1 + 2.6 * exp(-col.age * 4)            // the coma end glows hottest
+            let fade = (1 - t) * (1 - t) * (1 - t)
+            let gain = rowWeight[row] * min(col.activity, 2.2) * col.stria * fade * near * 0.11
+            let warm = simd_mix(SIMD3<Float>(0.86, 0.88, 1.0), SIMD3(1.0, 0.8, 0.5), SIMD3(repeating: 1 - beta))
+            let color = style == .light ? Self.iridescent(beta * 0.8 + t * 0.3) : warm
+            return PHRibbonVertex(position: tail.position(slot: col.slot, row: row), across: across, along: 0,
+                                  color: SIMD4(color, gain), params: params)
+        }
+
+        for row in 0..<(rows - 1) {
+            let start = ribbon.count
+            for c in 0..<columns {
+                ribbon.append(vertex(c, row, -1))
+                ribbon.append(vertex(c, row + 1, 1))
+            }
+            strips.append(start..<ribbon.count)
+        }
+
+        // feather: soft haze over the middle rows, sized to how wide each synchrone
+        // has spread, so folds and edges of the mesh melt into a cloud
+        for c in stride(from: 0, to: columns, by: 2) {
+            let col = tail.column(c)
+            let inner = tail.position(slot: col.slot, row: 1), outer = tail.position(slot: col.slot, row: rows - 2)
+            let spread = simd_distance(inner, outer)
+            guard spread > 6 else { continue }
+            let t = col.age / CometTail.life
+            let fade = (1 - t) * (1 - t) * (1 - t)
+            for row in stride(from: 2, to: rows - 2, by: 2) {
+                let gain = rowWeight[row] * min(col.activity, 2.2) * col.stria * fade * 0.05
+                let warm = simd_mix(SIMD3<Float>(0.86, 0.88, 1.0), SIMD3(1.0, 0.8, 0.5), SIMD3(repeating: 1 - CometTail.betas[row]))
+                sprite(tail.position(slot: col.slot, row: row), min(spread * 0.45, 70), PHSpriteHaze, SIMD4(warm * gain, 0))
+            }
         }
     }
 

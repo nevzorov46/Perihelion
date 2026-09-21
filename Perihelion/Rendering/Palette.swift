@@ -36,13 +36,18 @@ enum Palette {
         return SIMD3(linear(r), linear(g), linear(b))
     }
 
+    static func srgb(_ r: Double, _ g: Double, _ b: Double) -> SIMD3<Float> {
+        SIMD3(Float(pow(r, 2.2)), Float(pow(g, 2.2)), Float(pow(b, 2.2)))
+    }
+
     static func bodyColor(_ body: Body) -> SIMD3<Float> {
         switch body.kind {
         case .star:
+            // real stars are pale (Charity's blackbody table): O/B #9bb0ff, G #fff4ea, K #ffd2a1
             switch body.hue {
-            case ..<30: return hsl(body.hue, 0.95, 0.62)
-            case ..<100: return hsl(body.hue, 0.75, 0.76)
-            default: return hsl(body.hue, 0.8, 0.8)
+            case ..<30: return srgb(1.0, 0.82, 0.63)
+            case ..<100: return srgb(1.0, 0.96, 0.92)
+            default: return srgb(0.61, 0.69, 1.0)
             }
         case .planet: return hsl(body.hue, 0.5, 0.52)
         case .moon: return hsl(body.hue, 0.08, 0.62)
