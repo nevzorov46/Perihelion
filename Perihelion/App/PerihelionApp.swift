@@ -89,6 +89,12 @@ struct GameScreen: View {
             host.session.start()
             if screen != .playing { host.session.enterAttract() }
         }
+        // Lining up a shot means looking at the field and not touching it, which is
+        // exactly what the idle timer counts as doing nothing. Menus still sleep.
+        .onChange(of: screen, initial: true) { _, screen in
+            UIApplication.shared.isIdleTimerDisabled = screen == .playing
+        }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
         .onChange(of: host.session.hud.toast) { _, toast in
             if let toast { UIAccessibility.announce(toast) }
         }
