@@ -38,6 +38,7 @@ struct Shockwave {
 /// never observes this object - only `HUDModel`, which changes a few times per
 /// shot. Publishing per-frame state into SwiftUI would rebuild views 120 times a
 /// second for text that changes once.
+@MainActor
 final class GameSession {
     let hud = HUDModel()
     let synth = Synth()

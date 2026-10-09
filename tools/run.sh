@@ -2,6 +2,7 @@
 # Command-line tools that compile the app's physics sources directly.
 #   tools/run.sh bake     regenerate Perihelion/Game/Levels.swift
 #   tools/run.sh verify   check the integrator, the math and every level's proof shot
+#   tools/run.sh feel     measure the pull the player feels, to set haptic thresholds
 set -e
 cd "$(dirname "$0")/.."
 OUT=.build/tools
@@ -19,8 +20,12 @@ case "$1" in
     swiftc -O $PHYSICS Perihelion/Game/Levels.swift tools/verify/*.swift -o "$OUT/verify"
     "$OUT/verify"
     ;;
+  feel)
+    swiftc -O $PHYSICS Perihelion/Game/Levels.swift tools/feel/*.swift -o "$OUT/feel"
+    "$OUT/feel"
+    ;;
   *)
-    echo "usage: tools/run.sh bake|verify" >&2
+    echo "usage: tools/run.sh bake|verify|feel" >&2
     exit 1
     ;;
 esac

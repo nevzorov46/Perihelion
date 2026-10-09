@@ -2,6 +2,7 @@ import CoreHaptics
 import OSLog
 
 /// The taptic engine as a second instrument: every close pass is felt as well as heard.
+@MainActor
 final class Haptics {
     /// Off on the title screen: the attract loop shouldn't buzz in your hand.
     var isEnabled = true {

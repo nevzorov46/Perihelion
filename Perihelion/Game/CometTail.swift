@@ -18,6 +18,7 @@ import simd
 /// Ices sublimate faster near the star, so each column remembers how active the
 /// comet was when it left: the tail flares at perihelion. Purely visual - none of
 /// this feeds back into the physics.
+@MainActor
 final class CometTail {
     /// `-tailModel legacy` brings back the first pass (every star equally bright,
     /// activity ∝ 1/r²) for side-by-side comparison.

@@ -9,6 +9,7 @@ import QuartzCore
 ///
 /// The background (nebula + stars) is expensive per pixel and never moves, so it
 /// is rendered once per level into its own texture and blitted afterwards.
+@MainActor
 final class Renderer: NSObject, MTKViewDelegate {
     let device: MTLDevice
 
@@ -154,8 +155,10 @@ final class Renderer: NSObject, MTKViewDelegate {
 
     // MARK: - MTKViewDelegate
 
-    func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
-        makeTargets(size)
+    /// `MTKView` calls its delegate from the main run loop, which the protocol does
+    /// not express, so both entry points assert that once and stay on the actor.
+    nonisolated func mtkView(_ view: MTKView, drawableSizeWillChange size: CGSize) {
+        MainActor.assumeIsolated { makeTargets(size) }
     }
 
     private func makeTargets(_ size: CGSize) {
@@ -173,7 +176,11 @@ final class Renderer: NSObject, MTKViewDelegate {
         bakedBackgroundFor = nil
     }
 
-    func draw(in view: MTKView) {
+    nonisolated func draw(in view: MTKView) {
+        MainActor.assumeIsolated { drawFrame(in: view) }
+    }
+
+    private func drawFrame(in view: MTKView) {
         let now = CACurrentMediaTime()
         let dt = lastFrameTime.map { now - $0 } ?? 1.0 / 60
         lastFrameTime = now

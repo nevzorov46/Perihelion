@@ -10,6 +10,7 @@ private let log = Logger(subsystem: "com.nevzorov.Perihelion", category: "Synth"
 /// state directly: it pushes commands into a single-producer/single-consumer ring
 /// and the render block drains it at the top of each buffer. No locks and no
 /// allocation on the audio thread.
+@MainActor
 final class Synth {
     enum Voice: Int32 {
         case bell = 0    // a body at closest approach
@@ -33,8 +34,7 @@ final class Synth {
 
     private let engine = AVAudioEngine()
     private let reverb = AVAudioUnitReverb()
-    private var recording: AVAudioFile?
-    private let recordingQueue = DispatchQueue(label: "perihelion.synth.recording")
+    private var recording: RecordingSink?
     private let commands = CommandRing()
     private let bank = VoiceBank()
     private var isConfigured = false
@@ -90,8 +90,10 @@ final class Synth {
         routeObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange, object: engine, queue: .main
         ) { [weak self] _ in
-            self?.isRunning = false
-            self?.start()
+            Task { @MainActor in
+                self?.isRunning = false
+                self?.start()
+            }
         }
         isConfigured = true
     }
@@ -114,10 +116,10 @@ final class Synth {
             try? FileManager.default.removeItem(at: url)
             let file = try AVAudioFile(forWriting: url, settings: settings,
                                        commonFormat: .pcmFormatFloat32, interleaved: false)
-            recording = file
-            let queue = recordingQueue
+            let sink = RecordingSink(file: file)
+            recording = sink
             reverb.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
-                queue.async { try? file.write(from: buffer) }
+                sink.write(buffer)
             }
             log.notice("recording audio to \(url.path)")
         } catch {
@@ -126,10 +128,10 @@ final class Synth {
     }
 
     func stopRecording() {
-        guard let file = recording else { return }
+        guard let sink = recording else { return }
         reverb.removeTap(onBus: 0)
         recording = nil
-        recordingQueue.sync { file.close() }
+        sink.close()
         log.notice("audio recording closed")
     }
 
@@ -292,5 +294,28 @@ private final class VoiceBank: @unchecked Sendable {
             left[n] = tanh(l * 0.3)
             right[n] = tanh(r * 0.3)
         }
+    }
+}
+
+/// Owns the recording file and the single queue allowed to touch it.
+///
+/// `AVAudioFile` and `AVAudioPCMBuffer` are not `Sendable`, and the tap hands a
+/// buffer over from the audio thread. The transfer is safe because the tap gives
+/// up the buffer when it returns and every write happens on one serial queue,
+/// which is not something the compiler can check, so it is spelled out here
+/// rather than spread across the call site.
+private final class RecordingSink: @unchecked Sendable {
+    private let file: AVAudioFile
+    private let queue = DispatchQueue(label: "perihelion.synth.recording")
+
+    init(file: AVAudioFile) { self.file = file }
+
+    func write(_ buffer: AVAudioPCMBuffer) {
+        nonisolated(unsafe) let buffer = buffer
+        queue.async { [file] in try? file.write(from: buffer) }
+    }
+
+    func close() {
+        queue.sync { [file] in file.close() }
     }
 }

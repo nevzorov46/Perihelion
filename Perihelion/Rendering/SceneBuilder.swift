@@ -7,6 +7,7 @@ import simd
 ///
 /// Each visual style decides here how the same physics is drawn; the simulation
 /// and the shaders' building blocks are shared.
+@MainActor
 final class SceneBuilder {
     private(set) var sprites: [PHSprite] = []
     private(set) var ribbon: [PHRibbonVertex] = []

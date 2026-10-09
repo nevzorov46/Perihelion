@@ -15,6 +15,7 @@ struct PerihelionApp: App {
     }
 }
 
+@MainActor
 final class GameHost {
     let session: GameSession
     let renderer: Renderer?
