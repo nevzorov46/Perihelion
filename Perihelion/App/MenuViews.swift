@@ -1,13 +1,14 @@
 import SwiftUI
 
 enum Screen {
-    case title, skies, playing
+    case title, skies, settings, playing
 }
 
 /// Over the live attract loop: the name, one line, two ways in.
 struct TitleView: View {
     let onPlay: () -> Void
     let onSkies: () -> Void
+    let onSettings: () -> Void
     @State private var appeared = false
 
     var body: some View {
@@ -57,9 +58,16 @@ struct TitleView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(PressFade())
-                Text("real gravity · every pass is a note")
-                    .font(.system(size: 11, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.white.opacity(0.35))
+                Button(action: onSettings) {
+                    Text("SETTINGS")
+                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .tracking(3)
+                        .foregroundStyle(.white.opacity(0.4))
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 14)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressFade())
             }
             .padding(.bottom, 26)
             .opacity(appeared ? 1 : 0)

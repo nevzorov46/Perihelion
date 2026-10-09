@@ -58,6 +58,10 @@ final class GameSession {
     private(set) var shockwaves: [Shockwave] = []
     /// A brief exposure kick at the tightest passes, decaying to 0.
     private(set) var flash: Double = 0
+    /// How close this sky's own solution ever comes to a surface, 0 … 1.
+    /// The hum is scaled against it, so a gentle tutorial and a black hole both
+    /// use the whole range of the Taptic Engine instead of one of them being mute.
+    private var closestApproach: Double = 1
     /// Remaining freeze of simulated time after a hard pass (hit-stop).
     private var hitStop: Double = 0
     private var recordingEndsAt: Double?
@@ -209,6 +213,7 @@ final class GameSession {
         hitStop = 0
         easedSlowness = 0
         easedSlownessVelocity = 0
+        closestApproach = Self.closestApproach(of: level)
         camera = Camera()
         focusVelocity = .zero
         zoomVelocity = 0
@@ -268,6 +273,9 @@ final class GameSession {
     func restartLevel() {
         load(levelIndex)
     }
+
+    /// For the settings switch, which reads as "sound on" rather than "muted".
+    var isSoundOn: Bool { !synth.isMuted }
 
     func toggleMute() {
         synth.isMuted.toggle()
@@ -634,18 +642,53 @@ final class GameSession {
     private func updateClimax(dt: Double) {
         flash *= exp(-dt * 5)
         shockwaves.removeAll { clock - $0.start > Shockwave.life }
-        // the pull, felt: a hum that swells as the comet dives in and snaps off at the closest point
+        // the pull, felt: a hum that swells as the comet dives in and snaps off at
+        // the closest point
         var level: Float = 0
         if let current = flight, current.isFlying, cometVisible, completedAt == nil {
-            var pull = 0.0
-            for i in self.level.bodies.indices {
-                let d = current.bodyPositions[i] - current.position
-                pull = max(pull, self.level.bodies[i].mu / (d.x * d.x + d.y * d.y + 1))
-            }
-            let x = Float(min(max((pull - 700) / (6000 - 700), 0), 1))
-            level = x * x
+            let near = Self.closeness(of: current, in: self.level)
+            level = Float(Self.humLevel(near, reference: closestApproach))
         }
         haptics.gravity(level)
+    }
+
+    /// How close the comet is to the nearest surface, 1 at the moment of a crash.
+    ///
+    /// This is `mu / d²` divided by the same body's pull at its own surface, which
+    /// leaves `(R / d)²`: the mass cancels, so the number means the same thing on a
+    /// moon and on a black hole. An absolute pull cannot, because across the
+    /// campaign it spans a factor of seven hundred.
+    static func closeness(of flight: Flight, in level: Level) -> Double {
+        var closest = 0.0
+        for i in level.bodies.indices {
+            let d = flight.bodyPositions[i] - flight.position
+            let surface = level.bodies[i].radius + Sim.cometRadius
+            let r2 = max(d.x * d.x + d.y * d.y, 1e-9)
+            closest = max(closest, min(surface * surface / r2, 1))
+        }
+        return closest
+    }
+
+    /// Squared so the hum stays out of the way until the final approach: measured
+    /// over every level's proof shot, it is audible for a fifth of a tutorial
+    /// flight and for a few per cent of a busy one.
+    static func humLevel(_ closeness: Double, reference: Double) -> Double {
+        let relative = min(max(closeness / max(reference, 1e-9), 0), 1)
+        return relative * relative
+    }
+
+    /// Replays the sky's own solution to find out how close it ever gets. A proof
+    /// shot costs a few milliseconds, so this happens on load rather than being
+    /// baked into the level and going stale.
+    static func closestApproach(of level: Level) -> Double {
+        guard let shot = level.def.shot else { return 1 }
+        var flight = Flight(level: level, shot: shot)
+        var closest = 0.0
+        while flight.isFlying {
+            flight.step()
+            closest = max(closest, closeness(of: flight, in: level))
+        }
+        return max(closest, 0.01)
     }
 
     private func updateTail(dt: Double) {

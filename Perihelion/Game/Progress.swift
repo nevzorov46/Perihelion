@@ -20,6 +20,11 @@ final class Progress {
         UserDefaults.standard.set(best, forKey: "best")
     }
 
+    func reset() {
+        best = [:]
+        UserDefaults.standard.removeObject(forKey: "best")
+    }
+
     /// Where "Play" picks up: the first sky not yet cleared.
     func nextIndex(in levels: [LevelDef]) -> Int {
         levels.firstIndex { best[$0.id] == nil } ?? 0

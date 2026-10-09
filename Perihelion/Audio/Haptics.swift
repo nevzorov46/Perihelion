@@ -1,12 +1,47 @@
 import CoreHaptics
 import OSLog
+import UIKit
+
+private let log = Logger(subsystem: "com.nevzorov.Perihelion", category: "Haptics")
 
 /// The taptic engine as a second instrument: every close pass is felt as well as heard.
 @MainActor
 final class Haptics {
+    /// Why nothing is being felt, when nothing is.
+    ///
+    /// Worth a type rather than a Bool: "no vibration" has four very different
+    /// causes and from the outside they are indistinguishable. Settings shows this,
+    /// so the answer takes a glance instead of a debugging session.
+    enum Status: Equatable {
+        case ready
+        /// The player turned it off.
+        case off
+        /// No taptic engine, or the system has haptics switched off.
+        case unavailable
+        /// The engine exists but refused to start.
+        case failed(String)
+    }
+
+    private static let preferenceKey = "haptics.enabled"
+
+    /// The player's switch, remembered between launches.
+    var isOn: Bool {
+        didSet {
+            guard isOn != oldValue else { return }
+            UserDefaults.standard.set(isOn, forKey: Self.preferenceKey)
+            if !isOn { releaseGravity(); humLatched = false }
+        }
+    }
+
     /// Off on the title screen: the attract loop shouldn't buzz in your hand.
     var isEnabled = true {
         didSet { if !isEnabled { releaseGravity(); humLatched = false } }
+    }
+
+    /// `.ready` only when a pattern could actually reach the hand right now.
+    var status: Status {
+        if engine == nil { return engineFailure.map(Status.failed) ?? .unavailable }
+        return isOn ? .ready : .off
     }
 
     private var engine: CHHapticEngine?
@@ -16,19 +51,50 @@ final class Haptics {
     /// After the snap at perihelion the hum stays down until the pull fades, so it
     /// doesn't swell straight back up on the way out.
     private var humLatched = false
+    private var engineFailure: String?
+    private var activeObserver: NSObjectProtocol?
+
+    /// Everything that has to be true for a pattern to reach the hand.
+    private var canPlay: Bool { isOn && isEnabled && engine != nil }
 
     init() {
-        guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else { return }
+        isOn = UserDefaults.standard.object(forKey: Self.preferenceKey) as? Bool ?? true
+
+        guard CHHapticEngine.capabilitiesForHardware().supportsHaptics else {
+            log.notice("no haptic engine on this device")
+            return
+        }
         do {
             let engine = try CHHapticEngine()
             engine.playsHapticsOnly = true
-            engine.stoppedHandler = { [weak self] _ in self?.needsRestart = true }
-            engine.resetHandler = { [weak self] in self?.needsRestart = true }
+            engine.stoppedHandler = { @Sendable [weak self] reason in
+                log.notice("engine stopped, reason \(reason.rawValue)")
+                Task { @MainActor in self?.needsRestart = true }
+            }
+            engine.resetHandler = { @Sendable [weak self] in
+                Task { @MainActor in self?.needsRestart = true }
+            }
             try engine.start()
             self.engine = engine
+            log.notice("haptic engine running")
         } catch {
-            Logger(subsystem: "com.nevzorov.Perihelion", category: "Haptics").error("unavailable: \(error.localizedDescription)")
+            engineFailure = error.localizedDescription
+            log.error("engine unavailable: \(error.localizedDescription)")
         }
+
+        // iOS stops the engine while the app is away, and a pattern played after
+        // that silently does nothing. Bring it back with the app.
+        activeObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.needsRestart = true }
+        }
+    }
+
+    /// One firm tap, for the settings screen: the fastest way to find out whether
+    /// this device vibrates at all.
+    func test() {
+        play([transient(1, 0.6), transient(0.7, 0.3, at: 0.14)], ignoringAttract: true)
     }
 
     func tick() {
@@ -48,12 +114,12 @@ final class Haptics {
     /// A continuous rumble that follows the gravitational pull, 0 … 1. Parameters
     /// are only sent when the level moves noticeably, to stay off the haptic server.
     func gravity(_ level: Float) {
-        guard isEnabled, let engine else { return }
+        guard canPlay, let engine else { return }
         if humLatched {
             if level < 0.05 { humLatched = false }
             return
         }
-        if level < 0.03 {
+        if level < 0.08 {
             if hum != nil { stopHum() }
             return
         }
@@ -118,16 +184,21 @@ final class Haptics {
         ], relativeTime: time, duration: duration)
     }
 
-    private func play(_ events: [CHHapticEvent]) {
-        guard isEnabled, let engine else { return }
+    /// `ignoringAttract` lets the settings screen test the engine while the title
+    /// loop has haptics muted.
+    private func play(_ events: [CHHapticEvent], ignoringAttract: Bool = false) {
+        guard isOn, ignoringAttract || isEnabled, let engine else { return }
         do {
             if needsRestart {
                 try engine.start()
                 needsRestart = false
             }
             try engine.makePlayer(with: CHHapticPattern(events: events, parameters: [])).start(atTime: CHHapticTimeImmediate)
+            engineFailure = nil
         } catch {
             needsRestart = true
+            engineFailure = error.localizedDescription
+            log.error("pattern failed: \(error.localizedDescription)")
         }
     }
 }

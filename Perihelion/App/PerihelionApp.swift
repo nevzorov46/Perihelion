@@ -50,11 +50,15 @@ struct GameScreen: View {
             switch screen {
             case .title:
                 TitleView(onPlay: { play(host.session.progress.nextIndex(in: host.session.playlist)) },
-                          onSkies: { show(.skies) })
+                          onSkies: { show(.skies) },
+                          onSettings: { show(.settings) })
                     .transition(.opacity)
             case .skies:
                 SkiesView(levels: host.session.playlist, progress: host.session.progress,
                           onPick: { play($0) }, onBack: { show(.title) })
+                    .transition(.opacity)
+            case .settings:
+                SettingsView(session: host.session, onBack: { show(.title) })
                     .transition(.opacity)
             case .playing:
                 if !isClean {

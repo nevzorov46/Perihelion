@@ -67,18 +67,8 @@ final class Synth {
         let candidates = [engine.outputNode.outputFormat(forBus: 0).sampleRate, AVAudioSession.sharedInstance().sampleRate, 48_000]
         let sampleRate = candidates.first { $0 > 0 } ?? 48_000
         guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 2) else { return }
-        let commands = commands, bank = bank
-        let rate = Float(sampleRate)
-        let source = AVAudioSourceNode(format: format) { _, _, frameCount, bufferList in
-            let buffers = UnsafeMutableAudioBufferListPointer(bufferList)
-            guard buffers.count >= 2,
-                  let left = buffers[0].mData?.assumingMemoryBound(to: Float.self),
-                  let right = buffers[1].mData?.assumingMemoryBound(to: Float.self)
-            else { return noErr }
-            while let command = commands.pop() { bank.start(command) }
-            bank.render(left: left, right: right, frames: Int(frameCount), sampleRate: rate)
-            return noErr
-        }
+        let source = Self.makeSource(format: format, rate: Float(sampleRate),
+                                     commands: commands, bank: bank)
         reverb.loadFactoryPreset(.largeHall2)
         reverb.wetDryMix = 38
         engine.attach(source)
@@ -96,6 +86,27 @@ final class Synth {
             }
         }
         isConfigured = true
+    }
+
+    /// Builds the node whose block runs on the audio thread.
+    ///
+    /// `nonisolated` is the whole point: a closure written inside this `@MainActor`
+    /// class inherits the main actor, and Swift 6 then checks that at runtime and
+    /// traps on the audio thread. Building it here makes the boundary structural
+    /// instead of a comment, and the block touches only the lock-free ring and the
+    /// voice bank, never the class.
+    private nonisolated static func makeSource(format: AVAudioFormat, rate: Float,
+                                               commands: CommandRing, bank: VoiceBank) -> AVAudioSourceNode {
+        AVAudioSourceNode(format: format) { _, _, frameCount, bufferList in
+            let buffers = UnsafeMutableAudioBufferListPointer(bufferList)
+            guard buffers.count >= 2,
+                  let left = buffers[0].mData?.assumingMemoryBound(to: Float.self),
+                  let right = buffers[1].mData?.assumingMemoryBound(to: Float.self)
+            else { return noErr }
+            while let command = commands.pop() { bank.start(command) }
+            bank.render(left: left, right: right, frames: Int(frameCount), sampleRate: rate)
+            return noErr
+        }
     }
 
     /// Writes everything the synth plays to a 16-bit WAV, tapping before the main
@@ -118,7 +129,7 @@ final class Synth {
                                        commonFormat: .pcmFormatFloat32, interleaved: false)
             let sink = RecordingSink(file: file)
             recording = sink
-            reverb.installTap(onBus: 0, bufferSize: 4096, format: format) { buffer, _ in
+            reverb.installTap(onBus: 0, bufferSize: 4096, format: format) { @Sendable buffer, _ in
                 sink.write(buffer)
             }
             log.notice("recording audio to \(url.path)")

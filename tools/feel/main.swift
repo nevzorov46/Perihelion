@@ -4,8 +4,8 @@
 
 import Foundation
 
-/// The pull as `GameSession.updateClimax` computes it: the strongest single body.
-func pull(_ flight: Flight, _ level: Level) -> Double {
+/// The pull as today's `GameSession.updateClimax` computes it: absolute acceleration.
+func absolutePull(_ flight: Flight, _ level: Level) -> Double {
     var strongest = 0.0
     for i in level.bodies.indices {
         let d = flight.bodyPositions[i] - flight.position
@@ -14,25 +14,52 @@ func pull(_ flight: Flight, _ level: Level) -> Double {
     return strongest
 }
 
-/// The current mapping, kept here so the report shows what today's build feels like.
+/// The proposed measure: how close to a surface the comet is, where 1 is touching.
+///
+/// `mu / d²` divided by the same body's pull at its own surface leaves `(R / d)²`,
+/// so the mass cancels and the number means the same thing on a moon and on a
+/// black hole. That is what makes it usable on every level without tuning.
+func closeness(_ flight: Flight, _ level: Level) -> Double {
+    var closest = 0.0
+    for i in level.bodies.indices {
+        let d = flight.bodyPositions[i] - flight.position
+        let surface = level.bodies[i].radius + Sim.cometRadius
+        let ratio = surface * surface / max(d.x * d.x + d.y * d.y, 1e-9)
+        closest = max(closest, min(ratio, 1))
+    }
+    return closest
+}
+
+/// Today's mapping, kept so the report shows what the current build feels like.
 func currentLevel(_ pull: Double) -> Float {
     let x = Float(min(max((pull - 700) / (6000 - 700), 0), 1))
     return x * x
 }
 
+/// The proposed curve. Closeness alone is too quiet to feel on the gentle levels,
+/// where the comet never comes within seven radii of anything; raising it to a
+/// fractional power lifts a distant pass into the range the Taptic Engine can
+/// actually render while leaving a graze at full strength.
+func proposedLevel(_ closeness: Double) -> Double {
+    min(max(pow(closeness, 0.45), 0), 1)
+}
+
 struct Run {
     let id: String
-    let samples: [Double]
+    let absolute: [Double]
+    let close: [Double]
 
-    var peak: Double { samples.max() ?? 0 }
-    var median: Double { samples.isEmpty ? 0 : samples.sorted()[samples.count / 2] }
-    /// Share of the flight the hum would be audible, and the share at full strength.
-    var humShare: Double {
-        samples.isEmpty ? 0 : Double(samples.filter { currentLevel($0) >= 0.03 }.count) / Double(samples.count)
+    func share(_ samples: [Double], above threshold: Double) -> Double {
+        samples.isEmpty ? 0 : Double(samples.filter { $0 >= threshold }.count) / Double(samples.count)
     }
-    var fullShare: Double {
-        samples.isEmpty ? 0 : Double(samples.filter { currentLevel($0) >= 0.9 }.count) / Double(samples.count)
+
+    var peakClose: Double { close.max() ?? 0 }
+    var humShareToday: Double {
+        absolute.isEmpty ? 0 : Double(absolute.filter { currentLevel($0) >= 0.03 }.count) / Double(absolute.count)
     }
+        var humShareProposed: Double { share(close.map(proposedLevel), above: 0.05) }
+    var strongShareProposed: Double { share(close.map(proposedLevel), above: 0.5) }
+    var peakProposed: Double { close.map(proposedLevel).max() ?? 0 }
 }
 
 var runs: [Run] = []
@@ -40,12 +67,14 @@ for def in LevelDef.campaign {
     guard let shot = def.shot else { continue }
     let level = Level(def)
     var flight = Flight(level: level, shot: shot)
-    var samples: [Double] = []
+    var absolute: [Double] = []
+    var close: [Double] = []
     while flight.isFlying {
         flight.step()
-        samples.append(pull(flight, level))
+        absolute.append(absolutePull(flight, level))
+        close.append(closeness(flight, level))
     }
-    runs.append(Run(id: def.id, samples: samples))
+    runs.append(Run(id: def.id, absolute: absolute, close: close))
 }
 
 func pad(_ text: String, _ width: Int) -> String {
@@ -58,25 +87,38 @@ func right(_ text: String, _ width: Int) -> String {
 
 func whole(_ value: Double) -> String { String(Int(value.rounded())) }
 
-print("pull along each level's proof shot")
-print("  " + pad("level", 15) + right("median", 12) + right("peak", 12) + right("hum", 9) + right("full", 9))
-for run in runs {
-    print("  " + pad(run.id, 15)
-          + right(whole(run.median), 12)
-          + right(whole(run.peak), 12)
-          + right(whole(run.humShare * 100) + "%", 9)
-          + right(whole(run.fullShare * 100) + "%", 9))
+// Each level's own proof shot sets the reference: the hum is "how close to the
+// closest this level ever gets", so a gentle tutorial and a black hole both use
+// the full range of the Taptic Engine.
+func curve(_ relative: Double, _ power: Double) -> Double {
+    min(max(pow(min(max(relative, 0), 1), power), 0), 1)
 }
 
-let peaks = runs.map(\.peak).sorted()
-let medians = runs.map(\.median).sorted()
+let threshold = 0.08
+print("duty cycle of the hum, per curve power (share of flight above \(threshold))")
+print("  " + pad("level", 15) + right("today", 9) + right("p=1.0", 9) + right("p=1.5", 9)
+      + right("p=2.0", 9) + right("p=3.0", 9))
+for run in runs {
+    let peak = max(run.peakClose, 1e-9)
+    var cells = ""
+    for power in [1.0, 1.5, 2.0, 3.0] {
+        let levels = run.close.map { curve($0 / peak, power) }
+        let share = Double(levels.filter { $0 >= threshold }.count) / Double(max(levels.count, 1))
+        cells += right(whole(share * 100) + "%", 9)
+    }
+    print("  " + pad(run.id, 15) + right(whole(run.humShareToday * 100) + "%", 9) + cells)
+}
+
 print("")
-print("across the campaign")
-print("  peak pull:   lowest " + whole(peaks.first ?? 0) + ", median " + whole(peaks[peaks.count / 2]) + ", highest " + whole(peaks.last ?? 0))
-print("  median pull: lowest " + whole(medians.first ?? 0) + ", median " + whole(medians[medians.count / 2]) + ", highest " + whole(medians.last ?? 0))
-print("")
-print("  today's mapping starts the hum at pull 1617 and saturates at 6000")
-let silent = runs.filter { $0.humShare < 0.01 }.map(\.id)
-let pinned = runs.filter { $0.fullShare > 0.5 }.map(\.id)
-if !silent.isEmpty { print("  never hums:     " + silent.joined(separator: ", ")) }
-if !pinned.isEmpty { print("  pinned at full: " + pinned.joined(separator: ", ")) }
+print("share of flight at strong hum (>= 0.5)")
+print("  " + pad("level", 15) + right("p=1.0", 9) + right("p=1.5", 9) + right("p=2.0", 9) + right("p=3.0", 9))
+for run in runs {
+    let peak = max(run.peakClose, 1e-9)
+    var cells = ""
+    for power in [1.0, 1.5, 2.0, 3.0] {
+        let levels = run.close.map { curve($0 / peak, power) }
+        let share = Double(levels.filter { $0 >= 0.5 }.count) / Double(max(levels.count, 1))
+        cells += right(whole(share * 100) + "%", 9)
+    }
+    print("  " + pad(run.id, 15) + cells)
+}
