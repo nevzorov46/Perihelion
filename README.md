@@ -1,5 +1,7 @@
 # Perihelion
 
+[![CI](https://github.com/nevzorov46/Perihelion/actions/workflows/ci.yml/badge.svg)](https://github.com/nevzorov46/Perihelion/actions/workflows/ci.yml)
+
 A gravity-assist puzzle for iPhone where orbits play notes.
 
 <p align="center">

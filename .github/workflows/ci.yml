@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  physics:
+    name: Physics
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Swift version
+        run: swift --version
+      # The whole point of DMath: this runs on a machine that is not the one the
+      # levels were baked on, and the fingerprint has to come out the same.
+      - name: Verify the integrator, the trig and every proof shot
+        run: tools/run.sh verify
+
+  app:
+    name: App
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build for the simulator
+        run: |
+          xcodebuild build \
+            -project Perihelion.xcodeproj \
+            -scheme Perihelion \
+            -configuration Release \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            | xcbeautify || xcodebuild build \
+            -project Perihelion.xcodeproj \
+            -scheme Perihelion \
+            -configuration Release \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO
