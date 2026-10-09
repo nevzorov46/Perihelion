@@ -3,6 +3,7 @@
 #   tools/run.sh bake     regenerate Perihelion/Game/Levels.swift
 #   tools/run.sh verify   check the integrator, the math and every level's proof shot
 #   tools/run.sh feel     measure the pull the player feels, to set haptic thresholds
+#   tools/run.sh icon [level]   draw the app icon from a real trajectory
 set -e
 cd "$(dirname "$0")/.."
 OUT=.build/tools
@@ -24,8 +25,13 @@ case "$1" in
     swiftc -O $PHYSICS Perihelion/Game/Levels.swift tools/feel/*.swift -o "$OUT/feel"
     "$OUT/feel"
     ;;
+  icon)
+    swiftc -O $PHYSICS Perihelion/Game/Levels.swift tools/icon/*.swift -o "$OUT/icon"
+    shift
+    "$OUT/icon" "$@"
+    ;;
   *)
-    echo "usage: tools/run.sh bake|verify|feel" >&2
+    echo "usage: tools/run.sh bake|verify|feel|icon" >&2
     exit 1
     ;;
 esac
