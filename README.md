@@ -28,7 +28,7 @@ Difficulty is measured, not guessed. The tool re-fires the proof shot with the e
 
 ## Same bits everywhere
 
-Levels are baked on a Mac and played on a phone, and the simulation is chaotic: a last-bit difference in a moon's position becomes a different trajectory a few seconds later. libm's `sin`/`cos` are not guaranteed to be correctly rounded, so the physics uses its own, built only from `+ − × ÷` (`DMath.swift`), which IEEE-754 makes exact. `tools/run.sh verify` prints a fingerprint of every proof flight's final state; it must match on every machine.
+Levels are baked on a Mac and played on a phone, and the simulation is chaotic: a last-bit difference in a moon's position becomes a different trajectory a few seconds later. libm's `sin`/`cos` are not guaranteed to be correctly rounded, so the physics uses its own, built only from `+ − × ÷` (`DMath.swift`), which IEEE-754 makes exact. `tools/run.sh verify` hashes every proof flight's final state into one fingerprint and fails if it is not `e183dc68a2868236`. CI runs it on a GitHub macOS runner, which is the only way that claim means anything: the same number has to come out of hardware that is not mine.
 
 ## Rendering
 

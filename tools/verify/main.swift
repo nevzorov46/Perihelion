@@ -50,7 +50,12 @@ for def in LevelDef.campaign {
         fingerprint = (fingerprint ^ value.bitPattern) &* 1_099_511_628_211
     }
 }
-print("  fingerprint \(String(fingerprint, radix: 16)) - must match on every machine")
+// Pinned, so a change in the physics, the trig or the toolchain fails here
+// rather than quietly shipping levels whose proof shots no longer land.
+// Confirmed identical on an Apple silicon Mac and on a GitHub macOS runner.
+let expected = "e183dc68a2868236"
+let actual = String(fingerprint, radix: 16)
+check(actual == expected, "fingerprint \(actual), expected \(expected)")
 
 print(failures == 0 ? "all good" : "\(failures) failed")
 exit(failures == 0 ? 0 : 1)
