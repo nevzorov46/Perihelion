@@ -9,6 +9,7 @@ private struct HUDTheme {
     }
 
     func font(_ size: CGFloat, _ weight: Font.Weight = .regular) -> Font {
+        let size = Self.scaled(size)
         switch style {
         case .observatory: return .system(size: size, weight: weight)
         case .light: return .system(size: size, weight: weight == .semibold ? .light : .ultraLight)
@@ -17,7 +18,20 @@ private struct HUDTheme {
     }
 
     func mono(_ size: CGFloat) -> Font {
-        style == .atlas ? .system(size: size, design: .serif).italic() : .system(size: size, weight: .medium, design: .monospaced)
+        let size = Self.scaled(size)
+        return style == .atlas ? .system(size: size, design: .serif).italic()
+                               : .system(size: size, weight: .medium, design: .monospaced)
+    }
+
+    /// Dynamic Type, capped at 1.6.
+    ///
+    /// This text sits over a field that is being played, so letting it grow
+    /// without limit would cover the thing it describes. The cap keeps the largest
+    /// accessibility sizes readable while leaving the sky visible; a player who
+    /// needs more than that has Zoom, which magnifies the field along with the
+    /// words instead of eating it.
+    private static func scaled(_ size: CGFloat) -> CGFloat {
+        min(UIFontMetrics(forTextStyle: .body).scaledValue(for: size), size * 1.6)
     }
 
     func caption(level: Int) -> String {
@@ -153,6 +167,7 @@ private struct MotePips: View {
     let total: Int
     let collected: Int
     let theme: HUDTheme
+    private var differentiateWithoutColour: Bool { AccessibilitySettings.shared.differentiateWithoutColour }
 
     private var gold: Color {
         theme.style == .atlas ? theme.ink : Color(red: 1, green: 0.8, blue: 0.5)
@@ -163,11 +178,18 @@ private struct MotePips: View {
             ForEach(0..<total, id: \.self) { i in
                 let lit = i < collected
                 ZStack {
+                    // Collected and uncollected differ by hue first. With
+                    // Differentiate Without Color they differ by fill as well, so
+                    // the count can be read without telling gold from grey.
+                    Circle()
+                        .fill(lit && differentiateWithoutColour ? gold.opacity(0.9) : .clear)
                     Circle()
                         .strokeBorder(lit ? gold : theme.ink.opacity(0.22), lineWidth: 1)
                     Image(systemName: "sparkle")
                         .font(.system(size: 7, weight: .bold))
-                        .foregroundStyle(lit ? gold : theme.ink.opacity(0.22))
+                        .foregroundStyle(lit && differentiateWithoutColour
+                                         ? Color.black.opacity(0.75)
+                                         : (lit ? gold : theme.ink.opacity(0.22)))
                 }
                 .frame(width: 15, height: 15)
                 .shadow(color: lit ? gold.opacity(0.8) : .clear, radius: 4)
