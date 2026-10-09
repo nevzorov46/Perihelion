@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 @main
 struct PerihelionApp: App {
@@ -31,6 +32,7 @@ final class GameHost {
 
 struct GameScreen: View {
     let host: GameHost
+    private let a11y = AccessibilitySettings.shared
     /// `-clean YES` hides every overlay: footage of the sky alone, for editing.
     private let isClean = UserDefaults.standard.bool(forKey: "clean")
     /// Footage and test runs (`-demo`, `-level`, `-clean`) go straight into a sky.
@@ -70,12 +72,29 @@ struct GameScreen: View {
                             onRestart: { host.session.restartLevel() },
                             onToggleSound: { host.session.toggleMute() })
                         .transition(.opacity)
+                    // Dragging back from the comet carries the angle and the power,
+                    // and says neither out loud. With VoiceOver running they become
+                    // two controls the rotor can turn.
+                    if a11y.voiceOverRunning {
+                        VStack {
+                            Spacer()
+                            AimControlsView(session: host.session)
+                                .padding(.bottom, 92)
+                        }
+                    }
                 }
             }
         }
         .onAppear {
             host.session.start()
             if screen != .playing { host.session.enterAttract() }
+        }
+        .onChange(of: host.session.hud.toast) { _, toast in
+            if let toast { UIAccessibility.announce(toast) }
+        }
+        .onChange(of: host.session.hud.collected) { previous, collected in
+            guard collected > previous else { return }
+            UIAccessibility.announce("\(collected) of \(host.session.hud.moteCount)")
         }
     }
 

@@ -68,9 +68,9 @@ final class GameSession {
     /// Where the bodies are drawn: the flight's time, or winding back to zero.
     private(set) var bodyTime: Double = 0
 
-    private(set) var aim: Shot?
+    internal(set) var aim: Shot?
     private(set) var aimPower: Double = 0
-    private(set) var prediction: [SIMD2<Float>] = []
+    internal(set) var prediction: [SIMD2<Float>] = []
 
     private(set) var flight: Flight?
     private(set) var cometVisible = false
@@ -120,6 +120,7 @@ final class GameSession {
     /// The player's own mute, restored when leaving the title screen.
     private var userMuted = false
     let progress = Progress()
+    private let a11y = AccessibilitySettings.shared
     /// How close the camera pulls in during flight, and whether it tracks the comet.
     /// Still being tuned: `-zoom 1.3 -follow NO` tries other settings for one launch.
     private let flightZoom = UserDefaults.standard.string(forKey: "zoom").flatMap(Double.init) ?? 1.15
@@ -307,7 +308,7 @@ final class GameSession {
         let resting = current.samples.last(where: { now - $0.time >= 0.05 })?.point ?? point
         let restingPull = pull(from: current.start, to: resting)
         updateAim(pull: hypot(restingPull.dx, restingPull.dy) >= Self.deadZone ? restingPull : pull(from: current.start, to: point))
-        if let aim { launch(aim) }
+        if let aim { launchShot(aim) }
         aim = nil
         prediction = []
     }
@@ -345,7 +346,7 @@ final class GameSession {
         }
     }
 
-    private func setAim(_ shot: Shot, power: Double) {
+    func setAim(_ shot: Shot, power: Double) {
         aim = shot
         aimPower = power
         var preview = Flight(level: level, shot: shot)
@@ -368,7 +369,7 @@ final class GameSession {
         if ghosts.count > 6 { ghosts.removeFirst() }
     }
 
-    private func launch(_ shot: Shot) {
+    func launchShot(_ shot: Shot) {
         if rewind == nil { keepGhost() }
         rewind = nil
         trail = [TrailPoint(position: SIMD2<Float>(level.launch), speed: Float(shot.speed))]
@@ -485,9 +486,13 @@ final class GameSession {
             pulses.append(Pulse(body: body, start: clock, strength: strength))
             if strength > 0.3 {
                 // the climax: space rings out from the body, the frame flares, time catches its breath
-                shockwaves.append(Shockwave(center: current.bodyPositions[body], start: clock, strength: strength))
-                if shockwaves.count > Int(PH_MAX_WAVES) { shockwaves.removeFirst() }
-                flash = max(flash, Double(strength))
+                if !a11y.reduceMotion {
+                    shockwaves.append(Shockwave(center: current.bodyPositions[body], start: clock, strength: strength))
+                    if shockwaves.count > Int(PH_MAX_WAVES) { shockwaves.removeFirst() }
+                }
+                // The flare stays either way: it marks the moment without moving
+                // the frame, and it is what the eye uses to find the pass.
+                flash = max(flash, Double(strength) * (a11y.reduceMotion ? 0.5 : 1))
                 if strength > 0.45 { hitStop = 0.04 + 0.09 * Double(strength) }
             }
 
@@ -623,7 +628,9 @@ final class GameSession {
 
         // a decaying wobble, not white noise: it reads as an impact rather than a glitch
         shakeEnergy *= exp(-dt * 6)
-        if shakeEnergy > 0.01 {
+        if a11y.reduceMotion {
+            camera.shake = .zero
+        } else if shakeEnergy > 0.01 {
             shakePhase += dt * 34
             let amplitude = 7 * shakeEnergy
             camera.shake = CGVector(dx: amplitude * sin(shakePhase), dy: amplitude * sin(shakePhase * 0.73 + 1.7))
@@ -753,7 +760,7 @@ final class GameSession {
         let power = (shot.speed - Sim.minSpeed) / (Sim.maxSpeed - Sim.minSpeed) * eased
         setAim(Shot(angle: shot.angle, speed: Sim.minSpeed + (Sim.maxSpeed - Sim.minSpeed) * power), power: power)
         if t > 2.6 {
-            launch(shot)
+            launchShot(shot)
             aim = nil
             prediction = []
             demoStart = nil
