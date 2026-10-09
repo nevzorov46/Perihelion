@@ -14,7 +14,8 @@ final class AccessibilitySettings {
     /// Camera shake and screen-space distortion are the two things in this game
     /// that move the whole picture without the player asking. Both go away.
     private(set) var reduceMotion = UIAccessibility.isReduceMotionEnabled
-    /// Motes and bodies are told apart by hue first; with this on they get rings.
+    /// Collected motes are told apart from uncollected ones by hue first; with
+    /// this on, the collected ones are filled as well.
     private(set) var differentiateWithoutColour = UIAccessibility.shouldDifferentiateWithoutColor
     /// Aiming by dragging is no use to someone who cannot see where the drag
     /// started, so with VoiceOver running the field offers explicit controls.
