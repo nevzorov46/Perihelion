@@ -95,10 +95,3 @@ xcrun simctl launch booted com.nevzorov.Perihelion -level binary      # one sky
 xcrun simctl launch booted com.nevzorov.Perihelion -clean YES         # no overlays
 xcrun simctl launch booted com.nevzorov.Perihelion -aimControls YES   # the VoiceOver strip, without VoiceOver
 ```
-
-## What is not done
-
-- **No performance numbers from a device yet.** The game holds 60 fps on the title screen of an iPhone 13 mini, measured with Instruments, and the thermal state stays nominal, but that is ten seconds of an attract loop rather than a campaign. Frame timings under real play, the memory ceiling and the behaviour under thermal pressure are unmeasured, and the simulator cannot answer any of them: its Metal path is not a tile-based GPU.
-- **The haptic curve has not been felt.** Its shape is chosen from the measurements in `tools/run.sh feel`, which can say how long the hum lasts but not whether it feels good.
-- **The first sky has no star to pass**, so it has no comet tail and nothing to hear at perihelion. It teaches aiming and nothing else.
-- **The camera** pulls in during flight and leads the comet, and it is still not right.
